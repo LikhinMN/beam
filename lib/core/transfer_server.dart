@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'protocol.dart';
 import 'checksum.dart';
+import 'pairing.dart';
 
 class TransferServer {
   final StreamController<TransferEvent> _eventController = StreamController<TransferEvent>.broadcast();
@@ -38,56 +39,96 @@ class TransferServer {
 
   /// Spawns a new Isolate to handle the incoming connection.
   void _handleConnection(Socket client) async {
-    final receivePort = ReceivePort();
+    final ip = client.remoteAddress.address;
+    final buffer = BytesBuilder();
+    late StreamSubscription<Uint8List> sub;
+    bool headerProcessed = false;
+    SendPort? isolateSendPort;
     
-    // Prepare directory for saving files
-    // In a real app we might want to let the user pick, but we use app documents dir for now.
     final directory = await getApplicationDocumentsDirectory();
     final saveDir = directory.path;
 
-    await Isolate.spawn(
-      _isolateWorker, 
-      _IsolateArgs(receivePort.sendPort, saveDir, client.remoteAddress.address),
-    );
+    sub = client.listen(
+      (Uint8List data) async {
+        if (headerProcessed) {
+          isolateSendPort?.send(data);
+          return;
+        }
 
-    final streamIterator = StreamIterator(receivePort);
-    if (!await streamIterator.moveNext()) return;
-    
-    // The first message from isolate is its SendPort
-    final SendPort isolateSendPort = streamIterator.current as SendPort;
+        buffer.add(data);
+        if (buffer.length >= 269 && !headerProcessed) {
+          headerProcessed = true;
+          sub.pause();
 
-    // Send chunks to the isolate
-    client.listen(
-      (Uint8List data) {
-        isolateSendPort.send(data);
+          final allData = buffer.takeBytes();
+          final headerData = allData.sublist(0, 269);
+          BinaryHeader header;
+          try {
+            header = BinaryHeader.decode(Uint8List.fromList(headerData));
+          } catch (e) {
+            client.destroy();
+            return;
+          }
+
+          if (header.magic != BinaryHeader.magicNumber) {
+            client.destroy();
+            return;
+          }
+
+          if (header.op == BinaryHeader.opPair) {
+            await BeamPairing().respondToPairing(client, header.fileName);
+            client.destroy();
+            return;
+          }
+
+          if (header.op == BinaryHeader.opSend) {
+            final isTrusted = await BeamPairing().isTrusted(ip, header.fileName);
+            if (!isTrusted) {
+              _eventController.add(TransferEvent(
+                status: TransferEventType.failed,
+                error: 'Device not trusted. Please pair first.',
+                fileName: header.fileName,
+                senderIp: ip,
+              ));
+              client.destroy();
+              return;
+            }
+
+            final receivePort = ReceivePort();
+            await Isolate.spawn(
+              _isolateWorker, 
+              _IsolateArgs(receivePort.sendPort, saveDir, ip),
+            );
+
+            final streamIterator = StreamIterator(receivePort);
+            await streamIterator.moveNext();
+            isolateSendPort = streamIterator.current as SendPort;
+
+            receivePort.listen((message) {
+              if (message is TransferEvent) {
+                _eventController.add(message);
+              } else if (message is Map && message['action'] == 'send') {
+                client.add(message['data']);
+              } else if (message is Map && message['action'] == 'close') {
+                client.destroy();
+                receivePort.close();
+              }
+            });
+
+            isolateSendPort?.send(allData);
+            sub.resume();
+          } else {
+            client.destroy();
+          }
+        }
       },
       onDone: () {
-        isolateSendPort.send(null); // Signal EOF
+        if (headerProcessed) isolateSendPort?.send(null); // Signal EOF
       },
       onError: (error) {
-        isolateSendPort.send(error.toString()); // Signal error
+        if (headerProcessed) isolateSendPort?.send(error.toString()); // Signal error
       },
     );
-
-    // Listen for messages/events from the isolate
-    while (await streamIterator.moveNext()) {
-      final msg = streamIterator.current;
-      if (msg is TransferEvent) {
-        _eventController.add(msg);
-      } else if (msg is Map) {
-        // Used for control messages
-        final action = msg['action'];
-        if (action == 'send') {
-          final Uint8List data = msg['data'];
-          client.add(data);
-          await client.flush();
-        } else if (action == 'close') {
-          client.destroy();
-          receivePort.close();
-          break;
-        }
-      }
-    }
   }
 }
 
