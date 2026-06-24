@@ -35,6 +35,10 @@ class BinaryHeader {
   static const int opSend = 0x01;
   static const int opAck = 0x02;
   static const int opReject = 0x03;
+  static const int opPair = 0x04;
+  static const int opPairOk = 0x05;
+  static const int opPairReject = 0x06;
+  static const int opPin = 0x07;
 
   final int magic;
   final int op;
