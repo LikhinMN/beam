@@ -9,6 +9,10 @@ import 'package:beam/linux/file_drop_handler.dart';
 import 'package:beam/android/file_picker_helper.dart';
 import 'settings_screen.dart';
 import 'pairing_screen.dart';
+import 'package:beam/ui/state/actions.dart' as actions;
+import 'package:beam/core/transfer_server.dart';
+import 'package:beam/ui/state/app_state.dart';
+import 'package:beam/core/speed_calculator.dart';
 
 /// The main home screen of the Beam app.
 class HomeScreen extends StatefulWidget {
@@ -20,14 +24,53 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final BeamDiscovery _discovery = BeamDiscovery();
+  final TransferServer _server = TransferServer();
+  final Map<String, SpeedCalculator> _speedCalcs = {};
   FileDropHandler? _dropHandler;
   List<File>? _selectedFiles;
 
   @override
   void initState() {
     super.initState();
+    _discovery.peers.listen((peers) {
+      actions.setPeers(peers);
+    });
     _discovery.startAdvertising('Beam Device', 9001);
     _discovery.startScanning();
+
+    _server.events.listen((event) {
+      final id = event.fileName ?? 'unknown';
+      SpeedCalculator? calc = _speedCalcs[id];
+      if (calc == null) {
+        calc = SpeedCalculator();
+        _speedCalcs[id] = calc;
+      }
+
+      TransferStatus status = TransferStatus.active;
+      if (event.status.name == 'completed') status = TransferStatus.completed;
+      if (event.status.name == 'failed') status = TransferStatus.failed;
+
+      final transferred = event.bytesTransferred ?? 0;
+      calc.update(transferred);
+      final totalBytes = event.totalBytes ?? 0;
+
+      actions.upsertTransfer((
+        id: id,
+        fileName: event.fileName ?? 'Unknown',
+        totalBytes: totalBytes,
+        transferredBytes: transferred,
+        speedBytesPerSec: calc.currentSpeed,
+        eta: calc.eta(totalBytes > transferred ? totalBytes - transferred : 0),
+        direction: TransferDirection.receive,
+        status: status,
+        errorReason: event.error,
+      ));
+      
+      if (status != TransferStatus.active) {
+        _speedCalcs.remove(id);
+      }
+    });
+    _server.start(port: 9001);
 
     if (Platform.isLinux) {
       _dropHandler = FileDropHandler();
@@ -43,6 +86,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _discovery.stopAdvertising();
     _discovery.stopScanning();
+    _server.stop();
     _dropHandler?.dispose();
     super.dispose();
   }
