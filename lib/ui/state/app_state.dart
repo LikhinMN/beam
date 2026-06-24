@@ -1,5 +1,6 @@
 import 'package:pico/pico.dart';
 import 'package:beam/core/discovery.dart';
+import 'package:beam/core/transfer_history.dart';
 
 enum TransferDirection { send, receive }
 enum TransferStatus { active, completed, failed }
@@ -51,6 +52,7 @@ typedef AppState = ({
   String? firewallError,
   AsyncValue<void> pairingState,
   String? incomingPIN,
+  AsyncValue<List<HistoryEntry>> history,
 });
 
 extension AppStateX on AppState {
@@ -62,6 +64,7 @@ extension AppStateX on AppState {
     String? firewallError,
     AsyncValue<void>? pairingState,
     String? incomingPIN,
+    AsyncValue<List<HistoryEntry>>? history,
     bool clearSelectedPeer = false,
     bool clearFirewallError = false,
     bool clearIncomingPIN = false,
@@ -74,6 +77,7 @@ extension AppStateX on AppState {
       firewallError: clearFirewallError ? null : (firewallError ?? this.firewallError),
       pairingState: pairingState ?? this.pairingState,
       incomingPIN: clearIncomingPIN ? null : (incomingPIN ?? this.incomingPIN),
+      history: history ?? this.history,
     );
   }
 }

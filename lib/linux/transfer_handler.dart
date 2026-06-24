@@ -88,6 +88,10 @@ class LinuxTransferHandler {
         print('Transfer failed for $fileName: ${event.error}');
         _controller.add(LinuxTransferEvent(event, message: event.error));
         break;
+        
+      case TransferEventType.retrying:
+        _controller.add(LinuxTransferEvent(event));
+        break;
     }
   }
 

@@ -7,6 +7,7 @@ enum TransferEventType {
   progress,
   completed,
   failed,
+  retrying,
 }
 
 class TransferEvent {
@@ -17,6 +18,8 @@ class TransferEvent {
   final String? fileName;
   final String? filePath;
   final String? senderIp;
+  final int attempt;
+  final int maxAttempts;
 
   TransferEvent({
     required this.status,
@@ -26,6 +29,8 @@ class TransferEvent {
     this.fileName,
     this.filePath,
     this.senderIp,
+    this.attempt = 0,
+    this.maxAttempts = 0,
   });
 }
 

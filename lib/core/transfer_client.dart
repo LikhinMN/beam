@@ -6,6 +6,39 @@ import 'dart:async';
 import 'protocol.dart';
 import 'checksum.dart';
 
+class ChunkSizeTuner {
+  int chunkSize = 256 * 1024;
+  int _chunkCount = 0;
+  final _sw = Stopwatch();
+  bool _locked = false;
+
+  void onChunkStarted() {
+    if (!_locked && _chunkCount == 0) {
+      _sw.start();
+    }
+  }
+
+  void onChunkCompleted() {
+    if (_locked) return;
+    _chunkCount++;
+    if (_chunkCount == 10) {
+      _sw.stop();
+      final elapsedSec = _sw.elapsedMilliseconds / 1000.0;
+      if (elapsedSec > 0) {
+        final bytesSent = 10 * chunkSize;
+        final throughput = bytesSent / elapsedSec; // bytes per sec
+        
+        if (throughput > 80 * 1024 * 1024) {
+          chunkSize = 512 * 1024;
+        } else if (throughput < 20 * 1024 * 1024) {
+          chunkSize = 64 * 1024;
+        }
+      }
+      _locked = true;
+    }
+  }
+}
+
 class TransferClient {
   final StreamController<TransferEvent> _eventController = StreamController<TransferEvent>.broadcast();
 
@@ -17,6 +50,7 @@ class TransferClient {
     Socket? socket;
     try {
       final fileSize = await file.length();
+      final fileName = file.path.split(Platform.pathSeparator).last;
       
       _eventController.add(TransferEvent(
         status: TransferEventType.started,
@@ -27,11 +61,30 @@ class TransferClient {
       final checksum = await computeChecksum(file);
       final checksumBytes = utf8.encode(checksum);
 
-      // 2. Connect to the server
-      socket = await Socket.connect(host, port);
+      // 2. Connect to the server with retries
+      for (int attempt = 1; attempt <= 3; attempt++) {
+        try {
+          if (attempt > 1) {
+            _eventController.add(TransferEvent(
+              status: TransferEventType.retrying,
+              attempt: attempt,
+              maxAttempts: 3,
+              totalBytes: fileSize,
+            ));
+            await Future.delayed(const Duration(seconds: 2));
+          }
+          socket = await Socket.connect(host, port);
+          break; // Connected
+        } catch (e) {
+          if (attempt == 3) {
+            throw Exception('Connection failed after 3 attempts');
+          }
+        }
+      }
+
+      if (socket == null) throw Exception('Socket is null');
 
       // 3. Send header
-      final fileName = file.path.split(Platform.pathSeparator).last;
       final header = BinaryHeader(
         magic: BinaryHeader.magicNumber,
         op: BinaryHeader.opSend,
@@ -40,17 +93,21 @@ class TransferClient {
       );
       socket.add(header.encode());
 
-      // 4. Stream file in 256KB chunks
-      final chunkSize = 256 * 1024;
+      // 4. Stream file using ChunkSizeTuner
+      final tuner = ChunkSizeTuner();
       int bytesSent = 0;
       final raf = await file.open(mode: FileMode.read);
       
       try {
         while (bytesSent < fileSize) {
-          final bytesToRead = (fileSize - bytesSent < chunkSize) ? fileSize - bytesSent : chunkSize;
+          final currentChunkSize = tuner.chunkSize;
+          final bytesToRead = (fileSize - bytesSent < currentChunkSize) ? fileSize - bytesSent : currentChunkSize;
+          
+          tuner.onChunkStarted();
           final chunk = await raf.read(bytesToRead);
           socket.add(chunk);
           await socket.flush(); // Ensure chunks are sent continuously
+          tuner.onChunkCompleted();
           
           bytesSent += chunk.length;
           _eventController.add(TransferEvent(

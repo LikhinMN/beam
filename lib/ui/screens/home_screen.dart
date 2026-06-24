@@ -9,12 +9,9 @@ import 'package:beam/linux/file_drop_handler.dart';
 import 'package:beam/android/file_picker_helper.dart';
 import 'settings_screen.dart';
 import 'pairing_screen.dart';
-import 'package:beam/ui/state/actions.dart' as actions;
-import 'package:beam/core/transfer_server.dart';
 import 'package:beam/ui/state/app_state.dart';
-import 'package:beam/core/speed_calculator.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:math';
+import 'package:beam/core/app_services.dart';
+import 'history_screen.dart';
 
 /// The main home screen of the Beam app.
 class HomeScreen extends StatefulWidget {
@@ -25,78 +22,12 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final BeamDiscovery _discovery = BeamDiscovery();
-  final TransferServer _server = TransferServer();
-  final Map<String, SpeedCalculator> _speedCalcs = {};
   FileDropHandler? _dropHandler;
   List<File>? _selectedFiles;
 
   @override
   void initState() {
     super.initState();
-    _initServices();
-  }
-
-  Future<void> _initServices() async {
-    final prefs = await SharedPreferences.getInstance();
-    
-    // Setup Device ID
-    String? deviceId = prefs.getString('device_id');
-    if (deviceId == null) {
-      deviceId = DateTime.now().millisecondsSinceEpoch.toString() + Random().nextInt(10000).toString();
-      await prefs.setString('device_id', deviceId);
-    }
-
-    // Setup Device Name
-    String? deviceName = prefs.getString('device_name');
-    if (deviceName == null) {
-      deviceName = 'Beam Device';
-      await prefs.setString('device_name', deviceName);
-    }
-    
-    // Setup Port
-    final port = prefs.getInt('device_port') ?? 9001;
-
-    _discovery.peers.listen((peers) {
-      actions.setPeers(peers);
-    });
-    _discovery.startAdvertising(deviceName, port, deviceId);
-    _discovery.startScanning();
-
-    _server.events.listen((event) {
-      final id = event.fileName ?? 'unknown';
-      SpeedCalculator? calc = _speedCalcs[id];
-      if (calc == null) {
-        calc = SpeedCalculator();
-        _speedCalcs[id] = calc;
-      }
-
-      TransferStatus status = TransferStatus.active;
-      if (event.status.name == 'completed') status = TransferStatus.completed;
-      if (event.status.name == 'failed') status = TransferStatus.failed;
-
-      final transferred = event.bytesTransferred ?? 0;
-      calc.update(transferred);
-      final totalBytes = event.totalBytes ?? 0;
-
-      actions.upsertTransfer((
-        id: id,
-        fileName: event.fileName ?? 'Unknown',
-        totalBytes: totalBytes,
-        transferredBytes: transferred,
-        speedBytesPerSec: calc.currentSpeed,
-        eta: calc.eta(totalBytes > transferred ? totalBytes - transferred : 0),
-        direction: TransferDirection.receive,
-        status: status,
-        errorReason: event.error,
-      ));
-      
-      if (status != TransferStatus.active) {
-        _speedCalcs.remove(id);
-      }
-    });
-    _server.start(port: port);
-
     if (Platform.isLinux) {
       _dropHandler = FileDropHandler();
       _dropHandler!.onFilesDropped.listen((files) {
@@ -109,9 +40,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _discovery.stopAdvertising();
-    _discovery.stopScanning();
-    _server.stop();
     _dropHandler?.dispose();
     super.dispose();
   }
@@ -159,7 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Expanded(
             flex: 1,
-            child: PeerListWidget(discovery: _discovery),
+            child: PeerListWidget(discovery: discovery),
           ),
           Container(width: 1, color: BeamColors.textSecondary.withOpacity(0.2)),
           Expanded(
@@ -187,7 +115,7 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Expanded(
             flex: 1,
-            child: PeerListWidget(discovery: _discovery),
+            child: PeerListWidget(discovery: discovery),
           ),
           Container(height: 1, color: BeamColors.textSecondary.withOpacity(0.2)),
           const Expanded(
@@ -210,6 +138,14 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: BeamColors.background,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.history, color: BeamColors.textPrimary),
+            onPressed: () {
+              Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const HistoryScreen(),
+              ));
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.settings, color: BeamColors.textPrimary),
             onPressed: () {

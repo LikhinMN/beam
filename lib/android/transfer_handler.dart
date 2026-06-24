@@ -90,6 +90,9 @@ class TransferHandler {
         await BeamForegroundService.updateNotification('Beam is ready to receive files');
         await _showSystemNotification('Transfer Failed', 'Failed to receive $fileName');
         break;
+        
+      case TransferEventType.retrying:
+        break;
     }
   }
 }

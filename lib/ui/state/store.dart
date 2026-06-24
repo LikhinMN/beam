@@ -10,4 +10,5 @@ final store = Store<AppState>((
   firewallError: null,
   pairingState: const AsyncData(null),
   incomingPIN: null,
+  history: const AsyncData([]),
 ));
