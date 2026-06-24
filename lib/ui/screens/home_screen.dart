@@ -13,6 +13,8 @@ import 'package:beam/ui/state/actions.dart' as actions;
 import 'package:beam/core/transfer_server.dart';
 import 'package:beam/ui/state/app_state.dart';
 import 'package:beam/core/speed_calculator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:math';
 
 /// The main home screen of the Beam app.
 class HomeScreen extends StatefulWidget {
@@ -32,10 +34,33 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _initServices();
+  }
+
+  Future<void> _initServices() async {
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Setup Device ID
+    String? deviceId = prefs.getString('device_id');
+    if (deviceId == null) {
+      deviceId = DateTime.now().millisecondsSinceEpoch.toString() + Random().nextInt(10000).toString();
+      await prefs.setString('device_id', deviceId);
+    }
+
+    // Setup Device Name
+    String? deviceName = prefs.getString('device_name');
+    if (deviceName == null) {
+      deviceName = 'Beam Device';
+      await prefs.setString('device_name', deviceName);
+    }
+    
+    // Setup Port
+    final port = prefs.getInt('device_port') ?? 9001;
+
     _discovery.peers.listen((peers) {
       actions.setPeers(peers);
     });
-    _discovery.startAdvertising('Beam Device', 9001);
+    _discovery.startAdvertising(deviceName, port, deviceId);
     _discovery.startScanning();
 
     _server.events.listen((event) {
@@ -70,7 +95,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _speedCalcs.remove(id);
       }
     });
-    _server.start(port: 9001);
+    _server.start(port: port);
 
     if (Platform.isLinux) {
       _dropHandler = FileDropHandler();

@@ -35,7 +35,7 @@ class BeamDiscovery {
 
   BonsoirBroadcast? _broadcast;
   BonsoirDiscovery? _discovery;
-  String? _selfDeviceName;
+  String? _selfDeviceId;
 
   final _peers = <String, BeamPeer>{}; // Keyed by IP
   final _peersController = StreamController<List<BeamPeer>>.broadcast();
@@ -44,8 +44,8 @@ class BeamDiscovery {
   Stream<List<BeamPeer>> get peers => _peersController.stream;
 
   /// Starts advertising this device on the local network via mDNS.
-  Future<void> startAdvertising(String deviceName, int port) async {
-    _selfDeviceName = deviceName;
+  Future<void> startAdvertising(String deviceName, int port, String deviceId) async {
+    _selfDeviceId = deviceId;
     int retries = 3;
     bool success = false;
 
@@ -55,6 +55,7 @@ class BeamDiscovery {
       port: port,
       attributes: {
         'platform': Platform.isAndroid ? 'android' : (Platform.isLinux ? 'linux' : 'unknown'),
+        'id': deviceId,
       },
     );
 
@@ -110,8 +111,8 @@ class BeamDiscovery {
 
   /// Processes a resolved mDNS service.
   void _handleResolvedService(ResolvedBonsoirService service) {
-    // Exclude self by matching advertised service name
-    if (service.name == _selfDeviceName) return;
+    // Exclude self by matching unique device ID
+    if (service.attributes['id'] == _selfDeviceId) return;
 
     final ip = service.host ?? '';
     if (ip.isEmpty) return;
