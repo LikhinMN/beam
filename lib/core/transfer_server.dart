@@ -47,7 +47,7 @@ class TransferServer {
 
     await Isolate.spawn(
       _isolateWorker, 
-      _IsolateArgs(receivePort.sendPort, saveDir),
+      _IsolateArgs(receivePort.sendPort, saveDir, client.remoteAddress.address),
     );
 
     final streamIterator = StreamIterator(receivePort);
@@ -94,8 +94,9 @@ class TransferServer {
 class _IsolateArgs {
   final SendPort sendPort;
   final String saveDir;
+  final String senderIp;
 
-  _IsolateArgs(this.sendPort, this.saveDir);
+  _IsolateArgs(this.sendPort, this.saveDir, this.senderIp);
 }
 
 /// The worker function for the isolate.
@@ -159,6 +160,7 @@ void _isolateWorker(_IsolateArgs args) async {
             status: TransferEventType.started,
             totalBytes: header.fileSize,
             fileName: header.fileName,
+            senderIp: args.senderIp,
           ));
 
           // Put remaining bytes back into buffer
@@ -191,6 +193,7 @@ void _isolateWorker(_IsolateArgs args) async {
             bytesTransferred: bytesReceived,
             totalBytes: header.fileSize,
             fileName: header.fileName,
+            senderIp: args.senderIp,
           ));
         } else {
           // File data is already complete; this is checksum data
@@ -224,6 +227,7 @@ void _isolateWorker(_IsolateArgs args) async {
               totalBytes: header.fileSize,
               fileName: header.fileName,
               filePath: finalPath,
+              senderIp: args.senderIp,
             ));
           } else {
             // Checksum mismatch
@@ -242,6 +246,7 @@ void _isolateWorker(_IsolateArgs args) async {
               status: TransferEventType.failed,
               error: 'Checksum mismatch',
               fileName: header.fileName,
+              senderIp: args.senderIp,
             ));
           }
           break; // Done with this connection

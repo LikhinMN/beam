@@ -16,6 +16,7 @@ class TransferEvent {
   final String? error;
   final String? fileName;
   final String? filePath;
+  final String? senderIp;
 
   TransferEvent({
     required this.status,
@@ -24,6 +25,7 @@ class TransferEvent {
     this.error,
     this.fileName,
     this.filePath,
+    this.senderIp,
   });
 }
 
