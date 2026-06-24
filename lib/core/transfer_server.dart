@@ -82,7 +82,7 @@ class TransferServer {
           }
 
           if (header.op == BinaryHeader.opSend) {
-            final isTrusted = await BeamPairing().isTrusted(ip, header.fileName);
+            final isTrusted = await BeamPairing().isTrusted(ip);
             if (!isTrusted) {
               _eventController.add(TransferEvent(
                 status: TransferEventType.failed,

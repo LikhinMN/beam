@@ -196,7 +196,7 @@ class BeamPairing {
   }
 
   /// Checks the trusted store for a matching entry.
-  Future<bool> isTrusted(String ip, String deviceName) async {
+  Future<bool> isTrusted(String ip, {String? deviceName}) async {
     final prefs = await SharedPreferences.getInstance();
     final listStr = prefs.getString(_storeKey);
     if (listStr == null) return false;
@@ -204,7 +204,10 @@ class BeamPairing {
     try {
       final List<dynamic> list = jsonDecode(listStr);
       for (var item in list) {
-        if (item['ip'] == ip && item['deviceName'] == deviceName) {
+        if (item['ip'] == ip) {
+          if (deviceName != null && item['deviceName'] != deviceName) {
+            continue;
+          }
           return true;
         }
       }
