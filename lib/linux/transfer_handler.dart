@@ -10,7 +10,7 @@ import 'storage_helper.dart';
 class LinuxTransferEvent {
   final TransferEvent event;
   final String? message;
-  
+
   LinuxTransferEvent(this.event, {this.message});
 }
 
@@ -27,17 +27,22 @@ class LinuxTransferHandler {
     final isAccessible = await FirewallHelper.checkPortAccessible(port);
     if (!isAccessible) {
       final instructions = FirewallHelper.getFirewallInstructions(port);
-      _controller.add(LinuxTransferEvent(
-        TransferEvent(status: TransferEventType.failed, error: 'Port blocked'),
-        message: instructions,
-      ));
+      _controller.add(
+        LinuxTransferEvent(
+          TransferEvent(
+            status: TransferEventType.failed,
+            error: 'Port blocked',
+          ),
+          message: instructions,
+        ),
+      );
       // We continue to start the server anyway, as local firewall blocks
       // incoming packets but might allow local binding.
     }
-    
+
     // 2. Start the core server
     await server.start(port: port);
-    
+
     // 3. Listen and handle events
     server.events.listen(_handleEvent);
   }
@@ -52,28 +57,33 @@ class LinuxTransferHandler {
         print('Transfer started: $fileName from $senderIp');
         _controller.add(LinuxTransferEvent(event));
         break;
-        
+
       case TransferEventType.progress:
         // Emit progress directly to the UI stream
         _controller.add(LinuxTransferEvent(event));
         break;
-        
+
       case TransferEventType.completed:
         try {
           if (event.filePath != null) {
             final tempFile = File(event.filePath!);
             if (await tempFile.exists()) {
-              final downloadsDir = await StorageHelper.getDefaultDownloadDirectory();
-              
+              final downloadsDir =
+                  await StorageHelper.getDefaultDownloadDirectory();
+
               // Apply Linux-specific + common sanitization logic
               final sanitizedName = FileUtils.sanitizeFileName(fileName);
-              final finalName = FileUtils.resolveConflict(downloadsDir, sanitizedName);
-              
-              final finalPath = '${downloadsDir.path}${Platform.pathSeparator}$finalName';
-              
+              final finalName = FileUtils.resolveConflict(
+                downloadsDir,
+                sanitizedName,
+              );
+
+              final finalPath =
+                  '${downloadsDir.path}${Platform.pathSeparator}$finalName';
+
               await tempFile.copy(finalPath);
               await tempFile.delete(); // Cleanup temp file
-              
+
               print('Transfer completed: saved to $finalPath');
             }
           }
@@ -83,12 +93,12 @@ class LinuxTransferHandler {
           _controller.add(LinuxTransferEvent(event));
         }
         break;
-        
+
       case TransferEventType.failed:
         print('Transfer failed for $fileName: ${event.error}');
         _controller.add(LinuxTransferEvent(event, message: event.error));
         break;
-        
+
       case TransferEventType.retrying:
         _controller.add(LinuxTransferEvent(event));
         break;

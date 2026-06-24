@@ -50,13 +50,23 @@ class HistoryEntryWidget extends StatelessWidget {
               const SizedBox(height: 16),
               _DetailRow('File', entry.fileName),
               _DetailRow('Size', UIUtils.formatBytes(entry.fileSize)),
-              _DetailRow('Direction', entry.direction == 'send' ? 'Sent' : 'Received'),
+              _DetailRow(
+                'Direction',
+                entry.direction == 'send' ? 'Sent' : 'Received',
+              ),
               _DetailRow('Peer', '${entry.peerName} (${entry.peerIp})'),
               _DetailRow('Date', DateFormat('MMM d, yyyy h:mm a').format(date)),
-              _DetailRow('Speed', '${UIUtils.formatBytes(entry.speedBytesPerSec?.toInt() ?? 0)}/s'),
+              _DetailRow(
+                'Speed',
+                '${UIUtils.formatBytes(entry.speedBytesPerSec?.toInt() ?? 0)}/s',
+              ),
               _DetailRow('Status', entry.status),
               if (entry.errorReason != null)
-                _DetailRow('Error', entry.errorReason!, color: BeamColors.error),
+                _DetailRow(
+                  'Error',
+                  entry.errorReason!,
+                  color: BeamColors.error,
+                ),
               const SizedBox(height: 24),
               if (entry.direction == 'send') ...[
                 SizedBox(
@@ -72,8 +82,8 @@ class HistoryEntryWidget extends StatelessWidget {
                     ),
                     child: const Text('Send Again'),
                   ),
-                )
-              ]
+                ),
+              ],
             ],
           ),
         );
@@ -92,7 +102,11 @@ class HistoryEntryWidget extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: BeamColors.textSecondary.withValues(alpha: 0.1))),
+          border: Border(
+            bottom: BorderSide(
+              color: BeamColors.textSecondary.withValues(alpha: 0.1),
+            ),
+          ),
         ),
         child: Row(
           children: [
@@ -117,12 +131,16 @@ class HistoryEntryWidget extends StatelessWidget {
                 children: [
                   Text(
                     UIUtils.truncateMiddle(entry.fileName),
-                    style: BeamTextStyles.body.copyWith(fontWeight: FontWeight.w600),
+                    style: BeamTextStyles.body.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     '${entry.peerName} • ${UIUtils.formatBytes(entry.fileSize)}',
-                    style: BeamTextStyles.caption.copyWith(color: BeamColors.textSecondary),
+                    style: BeamTextStyles.caption.copyWith(
+                      color: BeamColors.textSecondary,
+                    ),
                   ),
                 ],
               ),
@@ -132,7 +150,9 @@ class HistoryEntryWidget extends StatelessWidget {
               children: [
                 Text(
                   _formatRelativeTime(entry.timestamp),
-                  style: BeamTextStyles.caption.copyWith(color: BeamColors.textSecondary),
+                  style: BeamTextStyles.caption.copyWith(
+                    color: BeamColors.textSecondary,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -143,7 +163,7 @@ class HistoryEntryWidget extends StatelessWidget {
                   ),
                 ),
               ],
-            )
+            ),
           ],
         ),
       ),
@@ -169,13 +189,17 @@ class _DetailRow extends StatelessWidget {
             width: 80,
             child: Text(
               label,
-              style: BeamTextStyles.body.copyWith(color: BeamColors.textSecondary),
+              style: BeamTextStyles.body.copyWith(
+                color: BeamColors.textSecondary,
+              ),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: BeamTextStyles.body.copyWith(color: color ?? BeamColors.textPrimary),
+              style: BeamTextStyles.body.copyWith(
+                color: color ?? BeamColors.textPrimary,
+              ),
             ),
           ),
         ],

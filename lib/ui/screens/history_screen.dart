@@ -89,7 +89,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
             return Center(
               child: Text(
                 'No transfer history yet',
-                style: BeamTextStyles.body.copyWith(color: BeamColors.textSecondary),
+                style: BeamTextStyles.body.copyWith(
+                  color: BeamColors.textSecondary,
+                ),
               ),
             );
           }

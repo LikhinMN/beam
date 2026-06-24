@@ -30,7 +30,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     _prefs = await SharedPreferences.getInstance();
-    
+
     // Load Name
     final name = _prefs.getString('device_name') ?? 'Beam Device';
     _nameController.text = name;
@@ -75,7 +75,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!Platform.isLinux) return;
     final dir = await FolderPickerHelper.pickDestinationFolder();
     if (dir != null) {
-      // Logic to actually save custom download folder not strictly required in sprint, 
+      // Logic to actually save custom download folder not strictly required in sprint,
       // but we update UI to reflect selection.
       setState(() {
         _downloadFolder = dir.path;
@@ -116,7 +116,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: _savePort,
           ),
           const SizedBox(height: 32),
-          
+
           if (Platform.isLinux) ...[
             _buildSectionTitle('Storage'),
             ListTile(
@@ -137,7 +137,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               padding: const EdgeInsets.symmetric(vertical: 16),
               child: Text(
                 'No trusted devices.',
-                style: BeamTextStyles.body.copyWith(color: BeamColors.textSecondary),
+                style: BeamTextStyles.body.copyWith(
+                  color: BeamColors.textSecondary,
+                ),
               ),
             )
           else
@@ -148,18 +150,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: Text(device['ip'] ?? 'Unknown IP'),
                 trailing: TextButton(
                   onPressed: () => _revokeTrust(device['deviceName'] ?? ''),
-                  child: const Text('Revoke', style: TextStyle(color: BeamColors.error)),
+                  child: const Text(
+                    'Revoke',
+                    style: TextStyle(color: BeamColors.error),
+                  ),
                 ),
               );
             }),
-          
+
           const SizedBox(height: 32),
           const Center(
             child: Text(
               'Beam Version 1.0.0',
               style: TextStyle(color: BeamColors.textSecondary),
             ),
-          )
+          ),
         ],
       ),
     );
@@ -168,10 +173,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildSectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
-      child: Text(
-        title,
-        style: BeamTextStyles.headline.copyWith(fontSize: 18),
-      ),
+      child: Text(title, style: BeamTextStyles.headline.copyWith(fontSize: 18)),
     );
   }
 }

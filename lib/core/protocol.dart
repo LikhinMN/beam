@@ -4,13 +4,7 @@ import 'dart:io';
 import 'dart:async';
 
 /// Represents the type of a transfer event.
-enum TransferEventType {
-  started,
-  progress,
-  completed,
-  failed,
-  retrying,
-}
+enum TransferEventType { started, progress, completed, failed, retrying }
 
 class TransferEvent {
   final TransferEventType status;
@@ -38,7 +32,7 @@ class TransferEvent {
 
 /// BinaryHeader used for TCP file transfers.
 class BinaryHeader {
-  static const int headerSize = 397;
+  static const int headerSize = 461;
   static const int magicNumber = 0x4245414D; // 0xBEAM
   static const int opSend = 0x01;
   static const int opAck = 0x02;
@@ -55,6 +49,7 @@ class BinaryHeader {
   final String fileName;
   final String deviceId;
   final String deviceName;
+  final String secret;
 
   BinaryHeader({
     required this.magic,
@@ -63,13 +58,14 @@ class BinaryHeader {
     required this.fileName,
     this.deviceId = '',
     this.deviceName = '',
+    this.secret = '',
   });
 
-  /// Encodes the header to a Uint8List of exactly 397 bytes.
+  /// Encodes the header to a Uint8List of exactly 461 bytes.
   Uint8List encode() {
     final buffer = Uint8List(headerSize);
     final byteData = ByteData.view(buffer.buffer);
-    
+
     // magic (Uint32)
     byteData.setUint32(0, magic, Endian.big);
     // op (Uint8)
@@ -84,25 +80,42 @@ class BinaryHeader {
 
     // deviceId (64 bytes UTF-8 null-padded)
     final deviceIdBytes = utf8.encode(deviceId);
-    final maxDeviceIdLen = deviceIdBytes.length < 64 ? deviceIdBytes.length : 64;
-    buffer.setRange(269, 269 + maxDeviceIdLen, deviceIdBytes.sublist(0, maxDeviceIdLen));
+    final maxDeviceIdLen = deviceIdBytes.length < 64
+        ? deviceIdBytes.length
+        : 64;
+    buffer.setRange(
+      269,
+      269 + maxDeviceIdLen,
+      deviceIdBytes.sublist(0, maxDeviceIdLen),
+    );
 
     // deviceName (64 bytes UTF-8 null-padded)
     final deviceNameBytes = utf8.encode(deviceName);
     final maxDeviceNameLen = deviceNameBytes.length < 64 ? deviceNameBytes.length : 64;
     buffer.setRange(333, 333 + maxDeviceNameLen, deviceNameBytes.sublist(0, maxDeviceNameLen));
 
+    // secret (64 bytes UTF-8 null-padded)
+    final secretBytes = utf8.encode(secret);
+    final maxSecretLen = secretBytes.length < 64 ? secretBytes.length : 64;
+    buffer.setRange(397, 397 + maxSecretLen, secretBytes.sublist(0, maxSecretLen));
+
     return buffer;
   }
 
   /// Decodes a Uint8List into a BinaryHeader.
-  /// Expects the list to be at least 397 bytes long.
+  /// Expects the list to be at least 461 bytes long.
   static BinaryHeader decode(Uint8List data) {
     if (data.length < headerSize) {
-      throw FormatException('Invalid header length: expected $headerSize bytes, got ${data.length}');
+      throw FormatException(
+        'Invalid header length: expected $headerSize bytes, got ${data.length}',
+      );
     }
 
-    final byteData = ByteData.view(data.buffer, data.offsetInBytes, data.lengthInBytes);
+    final byteData = ByteData.view(
+      data.buffer,
+      data.offsetInBytes,
+      data.lengthInBytes,
+    );
     final magic = byteData.getUint32(0, Endian.big);
     final op = byteData.getUint8(4);
     final fileSize = byteData.getUint64(5, Endian.big);
@@ -130,6 +143,13 @@ class BinaryHeader {
     }
     final deviceName = utf8.decode(data.sublist(333, 333 + deviceNameLength));
 
+    int secretLength = 0;
+    for (int i = 0; i < 64; i++) {
+      if (data[397 + i] == 0) break;
+      secretLength++;
+    }
+    final secret = utf8.decode(data.sublist(397, 397 + secretLength));
+
     return BinaryHeader(
       magic: magic,
       op: op,
@@ -137,6 +157,7 @@ class BinaryHeader {
       fileName: fileName,
       deviceId: deviceId,
       deviceName: deviceName,
+      secret: secret,
     );
   }
 }
@@ -149,7 +170,9 @@ class BeamSocket {
   final BytesBuilder _buffer = BytesBuilder();
 
   BeamSocket(this.socket) : iterator = StreamIterator<Uint8List>(socket) {
-    print('[Diagnostics] SOCKET_STREAM_OWNER BeamSocket attached to socket ${socket.remotePort}');
+    print(
+      '[Diagnostics] SOCKET_STREAM_OWNER BeamSocket attached to socket ${socket.remotePort}',
+    );
   }
 
   Future<BinaryHeader> readHeader({Duration? timeout}) async {
@@ -165,16 +188,16 @@ class BeamSocket {
       }
       _buffer.add(iterator.current);
     }
-    
+
     final allData = _buffer.takeBytes();
     final headerData = allData.sublist(0, BinaryHeader.headerSize);
     final header = BinaryHeader.decode(Uint8List.fromList(headerData));
-    
+
     final remaining = allData.sublist(BinaryHeader.headerSize);
     if (remaining.isNotEmpty) {
       _buffer.add(remaining);
     }
-    
+
     return header;
   }
 

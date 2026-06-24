@@ -11,23 +11,23 @@ class FileUtils {
   static String sanitizeFileName(String name) {
     // Trim whitespace
     String sanitized = name.trim();
-    
+
     // Strip leading dots to prevent hidden files or traversal attempts
     while (sanitized.startsWith('.')) {
       sanitized = sanitized.substring(1);
     }
-    
+
     // Replace path separators and null bytes (illegal on Linux/Android) with underscores
     sanitized = sanitized
         .replaceAll('/', '_')
         .replaceAll('\\', '_')
         .replaceAll('\x00', '_');
-    
+
     // Truncate to 200 chars while attempting to preserve the file extension
     if (sanitized.length > 200) {
       final ext = p.extension(sanitized);
       final baseName = p.basenameWithoutExtension(sanitized);
-      
+
       final charsLeft = 200 - ext.length;
       if (charsLeft > 0) {
         sanitized = baseName.substring(0, charsLeft) + ext;
@@ -36,12 +36,12 @@ class FileUtils {
         sanitized = sanitized.substring(0, 200);
       }
     }
-    
+
     // Provide a default name if it becomes empty
     if (sanitized.isEmpty) {
       sanitized = 'unnamed_file';
     }
-    
+
     return sanitized;
   }
 
@@ -51,15 +51,15 @@ class FileUtils {
   static String resolveConflict(Directory dir, String fileName) {
     final baseName = p.basenameWithoutExtension(fileName);
     final ext = p.extension(fileName);
-    
+
     String currentName = fileName;
     int counter = 1;
-    
+
     while (File(p.join(dir.path, currentName)).existsSync()) {
       currentName = '${baseName}_$counter$ext';
       counter++;
     }
-    
+
     return currentName;
   }
 }

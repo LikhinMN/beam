@@ -1,12 +1,18 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'package:crypto/crypto.dart';
 
 /// Computes the SHA256 checksum of a file.
 /// Streams the file to avoid loading it entirely into memory.
+/// Runs in a background isolate to prevent UI frame skips.
 Future<String> computeChecksum(File file) async {
-  final stream = file.openRead();
-  final digest = await sha256.bind(stream).single;
-  return digest.toString();
+  final path = file.path;
+  return Isolate.run(() async {
+    final isolateFile = File(path);
+    final stream = isolateFile.openRead();
+    final digest = await sha256.bind(stream).single;
+    return digest.toString();
+  });
 }
 
 /// Verifies that the file's SHA256 checksum matches the expected checksum.

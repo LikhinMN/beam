@@ -83,10 +83,7 @@ class TransferHistory {
 
     return await databaseFactory.openDatabase(
       path,
-      options: OpenDatabaseOptions(
-        version: 1,
-        onCreate: _createDB,
-      ),
+      options: OpenDatabaseOptions(version: 1, onCreate: _createDB),
     );
   }
 
@@ -123,7 +120,11 @@ class TransferHistory {
     );
 
     // Use insert with conflict algorithm replace since we might update an entry from active -> completed/failed
-    await db.insert('transfers', entry.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert(
+      'transfers',
+      entry.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   Future<List<HistoryEntry>> getAll() async {

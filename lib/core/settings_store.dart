@@ -10,7 +10,7 @@ class SettingsStore {
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
-    
+
     // Auto-initialize deviceName if missing
     if (_prefs.getString('device_name') == null) {
       await _prefs.setString('device_name', resolveDeviceName());
@@ -34,7 +34,9 @@ class SettingsStore {
   String get deviceId {
     String? id = _prefs.getString('device_id');
     if (id == null) {
-      id = DateTime.now().millisecondsSinceEpoch.toString() + Random().nextInt(10000).toString();
+      id =
+          DateTime.now().millisecondsSinceEpoch.toString() +
+          Random().nextInt(10000).toString();
       _prefs.setString('device_id', id);
     }
     return id;
@@ -59,7 +61,8 @@ class SettingsStore {
     await _prefs.setBool('auto_accept', val);
   }
 
-  bool get showSpeedInNotification => _prefs.getBool('show_speed_notif') ?? true;
+  bool get showSpeedInNotification =>
+      _prefs.getBool('show_speed_notif') ?? true;
   Future<void> setShowSpeedInNotification(bool val) async {
     await _prefs.setBool('show_speed_notif', val);
   }

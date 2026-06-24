@@ -2,9 +2,9 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:async';
-
 import 'protocol.dart';
 import 'checksum.dart';
+import 'package:beam/core/settings_store.dart';
 
 class ChunkSizeTuner {
   int chunkSize = 256 * 1024;
@@ -27,7 +27,7 @@ class ChunkSizeTuner {
       if (elapsedSec > 0) {
         final bytesSent = 10 * chunkSize;
         final throughput = bytesSent / elapsedSec; // bytes per sec
-        
+
         if (throughput > 80 * 1024 * 1024) {
           chunkSize = 512 * 1024;
         } else if (throughput < 20 * 1024 * 1024) {
@@ -40,22 +40,62 @@ class ChunkSizeTuner {
 }
 
 class TransferClient {
-  final StreamController<TransferEvent> _eventController = StreamController<TransferEvent>.broadcast();
+  final StreamController<TransferEvent> _eventController =
+      StreamController<TransferEvent>.broadcast();
 
   /// Exposes a stream of TransferEvents.
   Stream<TransferEvent> get events => _eventController.stream;
 
+  void dispose() {
+    _eventController.close();
+  }
+
+  Future<void> sendFiles(String host, int port, List<File> files) async {
+    Socket? rawSocket;
+    BeamSocket? beamSocket;
+    try {
+      rawSocket = await Socket.connect(host, port);
+      beamSocket = BeamSocket(rawSocket);
+
+      final connectHeader = BinaryHeader(
+        magic: BinaryHeader.magicNumber,
+        op: BinaryHeader.opConnect,
+        fileSize: 0,
+        fileName: '',
+        deviceId: SettingsStore.instance.deviceId,
+        deviceName: SettingsStore.instance.deviceName,
+      );
+      rawSocket.add(connectHeader.encode());
+      await rawSocket.flush();
+
+      final response = await beamSocket.readHeader(timeout: const Duration(seconds: 10));
+      if (response.op != BinaryHeader.opAck) {
+        throw Exception("Session rejected by server");
+      }
+
+      for (final file in files) {
+        await sendFile(host, port, file, existingSocket: beamSocket);
+      }
+    } finally {
+      rawSocket?.destroy();
+    }
+  }
+
   /// Sends a file to the specified host and port.
-  Future<void> sendFile(String host, int port, File file, {BeamSocket? existingSocket}) async {
+  Future<void> sendFile(
+    String host,
+    int port,
+    File file, {
+    BeamSocket? existingSocket,
+  }) async {
     BeamSocket? beamSocket = existingSocket;
     try {
       final fileSize = await file.length();
       final fileName = file.path.split(Platform.pathSeparator).last;
-      
-      _eventController.add(TransferEvent(
-        status: TransferEventType.started,
-        totalBytes: fileSize,
-      ));
+
+      _eventController.add(
+        TransferEvent(status: TransferEventType.started, totalBytes: fileSize),
+      );
 
       // 1. Compute checksum first
       final checksum = await computeChecksum(file);
@@ -66,12 +106,14 @@ class TransferClient {
         for (int attempt = 1; attempt <= 3; attempt++) {
           try {
             if (attempt > 1) {
-              _eventController.add(TransferEvent(
-                status: TransferEventType.retrying,
-                attempt: attempt,
-                maxAttempts: 3,
-                totalBytes: fileSize,
-              ));
+              _eventController.add(
+                TransferEvent(
+                  status: TransferEventType.retrying,
+                  attempt: attempt,
+                  maxAttempts: 3,
+                  totalBytes: fileSize,
+                ),
+              );
               await Future.delayed(const Duration(seconds: 2));
             }
             final socket = await Socket.connect(host, port);
@@ -100,24 +142,34 @@ class TransferClient {
       final tuner = ChunkSizeTuner();
       int bytesSent = 0;
       final raf = await file.open(mode: FileMode.read);
-      
+
       try {
+        DateTime lastProgressTime = DateTime.now();
         while (bytesSent < fileSize) {
           final currentChunkSize = tuner.chunkSize;
-          final bytesToRead = (fileSize - bytesSent < currentChunkSize) ? fileSize - bytesSent : currentChunkSize;
-          
+          final bytesToRead = (fileSize - bytesSent < currentChunkSize)
+              ? fileSize - bytesSent
+              : currentChunkSize;
+
           tuner.onChunkStarted();
           final chunk = await raf.read(bytesToRead);
           beamSocket.socket.add(chunk);
-          await beamSocket.socket.flush(); // Ensure chunks are sent continuously
+          await beamSocket.socket
+              .flush(); // Ensure chunks are sent continuously
           tuner.onChunkCompleted();
-          
+
           bytesSent += chunk.length;
-          _eventController.add(TransferEvent(
-            status: TransferEventType.progress,
-            bytesTransferred: bytesSent,
-            totalBytes: fileSize,
-          ));
+          final now = DateTime.now();
+          if (now.difference(lastProgressTime).inMilliseconds >= 50) {
+            lastProgressTime = now;
+            _eventController.add(
+              TransferEvent(
+                status: TransferEventType.progress,
+                bytesTransferred: bytesSent,
+                totalBytes: fileSize,
+              ),
+            );
+          }
         }
       } finally {
         await raf.close();
@@ -128,25 +180,27 @@ class TransferClient {
       await beamSocket.socket.flush();
 
       // 6. Wait for ACK or REJECT
-      final responseHeader = await beamSocket.readHeader(timeout: const Duration(seconds: 30));
-        
+      final responseHeader = await beamSocket.readHeader(
+        timeout: const Duration(seconds: 30),
+      );
+
       if (responseHeader.op == BinaryHeader.opAck) {
-        _eventController.add(TransferEvent(
-          status: TransferEventType.completed,
-          bytesTransferred: fileSize,
-          totalBytes: fileSize,
-        ));
+        _eventController.add(
+          TransferEvent(
+            status: TransferEventType.completed,
+            bytesTransferred: fileSize,
+            totalBytes: fileSize,
+          ),
+        );
       } else if (responseHeader.op == BinaryHeader.opReject) {
         throw Exception('Server rejected the file (checksum mismatch)');
       } else {
         throw Exception('Unknown server response op: ${responseHeader.op}');
       }
-
     } catch (e) {
-      _eventController.add(TransferEvent(
-        status: TransferEventType.failed,
-        error: e.toString(),
-      ));
+      _eventController.add(
+        TransferEvent(status: TransferEventType.failed, error: e.toString()),
+      );
     } finally {
       if (existingSocket == null) {
         beamSocket?.socket.destroy();

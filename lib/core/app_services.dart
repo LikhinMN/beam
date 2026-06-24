@@ -67,7 +67,7 @@ Future<void> initAppServices() async {
       peerName: 'Sender', // Basic fallback
       peerIp: event.senderIp,
     );
-    
+
     if (status != TransferStatus.active) {
       _speedCalcs.remove(id);
     }
@@ -79,29 +79,13 @@ Future<void> initAppServices() async {
     print('Failed to start server: $e');
   }
 
-  // 4. Wire up pairing events
-  BeamPairing().pairingEvents.listen((event) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (event.type == PairingEventType.pairingSuccess) {
-        actions.setPairingState(const AsyncData(null));
-        actions.setIncomingPIN(null);
-      } else if (event.type == PairingEventType.waitingForPin) {
-        actions.setPairingState(const AsyncLoading());
-      } else if (event.type == PairingEventType.pinGenerated) {
-        actions.setIncomingPIN(event.pin);
-        actions.setPairingState(const AsyncLoading());
-      } else if (event.type == PairingEventType.pairingFailed || event.type == PairingEventType.pairingTimeout) {
-        actions.setPairingState(AsyncError(Exception(event.message ?? 'Pairing failed'), StackTrace.current));
-        actions.setIncomingPIN(null);
-      }
-    });
-  });
+  // 4. Init QR pairing session secret
+  BeamPairing.instance.init();
 
   // 5 & 6. Start mDNS advertising and scanning
   await discovery.startAdvertising(deviceName, port, deviceId);
-  
-  WidgetsBinding.instance.addPostFrameCallback((_) async {
-    await Future.delayed(const Duration(milliseconds: 500));
+
+  Future.delayed(const Duration(milliseconds: 500), () async {
     await discovery.startScanning();
   });
 }

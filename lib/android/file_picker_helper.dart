@@ -12,14 +12,17 @@ class FilePickerHelper {
 
     // Request older storage permissions
     final storage = await Permission.storage.request();
-    
+
     // Request Android 13+ granular media permissions
     final photos = await Permission.photos.request();
     final videos = await Permission.videos.request();
     final audio = await Permission.audio.request();
 
     // If any of the relevant permissions are granted, we proceed.
-    return storage.isGranted || photos.isGranted || videos.isGranted || audio.isGranted;
+    return storage.isGranted ||
+        photos.isGranted ||
+        videos.isGranted ||
+        audio.isGranted;
   }
 
   /// Opens the file picker allowing multiple file selection.
@@ -31,23 +34,18 @@ class FilePickerHelper {
       // require explicit READ_EXTERNAL_STORAGE permissions. The selected files are
       // automatically cached in the app's local cache directory.
 
-      final result = await FilePicker.platform.pickFiles(
-        allowMultiple: true,
-      );
+      final result = await FilePicker.platform.pickFiles(allowMultiple: true);
 
       if (result != null) {
-        return result.files
-            .where((f) => f.path != null)
-            .map((f) {
-              f.readStream?.drain();
-              return File(f.path!);
-            })
-            .toList();
+        return result.files.where((f) => f.path != null).map((f) {
+          f.readStream?.drain();
+          return File(f.path!);
+        }).toList();
       }
     } catch (e) {
       print('Error picking files: $e');
     }
-    
+
     return [];
   }
 }

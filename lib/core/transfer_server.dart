@@ -16,7 +16,8 @@ import 'package:beam/android/storage_helper.dart' as android_storage;
 import 'package:beam/linux/storage_helper.dart' as linux_storage;
 
 class TransferServer {
-  final StreamController<TransferEvent> _eventController = StreamController<TransferEvent>.broadcast();
+  final StreamController<TransferEvent> _eventController =
+      StreamController<TransferEvent>.broadcast();
   ServerSocket? _serverSocket;
   bool _isRunning = false;
   final List<Socket> _activeSockets = [];
@@ -33,21 +34,28 @@ class TransferServer {
       shared: true,
     );
     print('[Resource] RESOURCE_OPEN ServerSocket on port $port');
-    
-    _serverSocket!.listen((Socket client) {
-      print('[Resource] RESOURCE_OPEN Socket connection from ${client.remoteAddress.address}');
-      if (!_isRunning) {
-        client.destroy();
-        return;
-      }
-      _activeSockets.add(client);
-      _handleConnection(BeamSocket(client));
-    }, onError: (error) {
-      _eventController.add(TransferEvent(
-        status: TransferEventType.failed,
-        error: error.toString(),
-      ));
-    });
+
+    _serverSocket!.listen(
+      (Socket client) {
+        print(
+          '[Resource] RESOURCE_OPEN Socket connection from ${client.remoteAddress.address}',
+        );
+        if (!_isRunning) {
+          client.destroy();
+          return;
+        }
+        _activeSockets.add(client);
+        _handleConnection(BeamSocket(client));
+      },
+      onError: (error) {
+        _eventController.add(
+          TransferEvent(
+            status: TransferEventType.failed,
+            error: error.toString(),
+          ),
+        );
+      },
+    );
   }
 
   /// Stops the TCP server.
@@ -81,26 +89,26 @@ class TransferServer {
 
       switch (header.op) {
         case BinaryHeader.opPair:
-          // Trigger pairing flow — do NOT close socket
-          final result = await BeamPairing().respondToPairing(beamSocket, header.deviceName.isNotEmpty ? header.deviceName : header.fileName);
-          if (result == PairingResult.success) {
-            // After pairing succeeds, read the next header on same socket
-            // The client will send OP_CONNECT immediately after PAIR_OK
-            await _handleConnection(beamSocket);
-          } else {
-            print('[Resource] RESOURCE_CLOSE Socket (pairing failed)');
-            client.destroy();
-            _activeSockets.remove(client);
-          }
+          // Trigger QR pairing flow
+          await BeamPairing.instance.respondToQRPairing(beamSocket, header);
+          client.destroy();
+          _activeSockets.remove(client);
           break;
 
         case BinaryHeader.opConnect:
           // Session establishment — check if sender is trusted
           final senderIp = ip;
           final senderName = header.deviceName;
-          if (await BeamPairing().isTrusted(senderIp)) {
+          if (await BeamPairing.instance.isTrusted(senderIp, senderName)) {
             // Send OP_ACK to confirm session
-            client.add(BinaryHeader(magic: BinaryHeader.magicNumber, op: BinaryHeader.opAck, fileSize: 0, fileName: '').encode());
+            client.add(
+              BinaryHeader(
+                magic: BinaryHeader.magicNumber,
+                op: BinaryHeader.opAck,
+                fileSize: 0,
+                fileName: '',
+              ).encode(),
+            );
             // Update peer state to CONNECTED in the store
             if (header.deviceId.isNotEmpty) {
               actions.setPeerState(header.deviceId, PeerState.connected);
@@ -108,9 +116,17 @@ class TransferServer {
             // Keep socket open — wait for next header (OP_SEND)
             await _handleConnection(beamSocket);
           } else {
-            // Not trusted — send OP_PAIR to initiate pairing
-            client.add(BinaryHeader(magic: BinaryHeader.magicNumber, op: BinaryHeader.opPair, fileSize: 0, fileName: '').encode());
-            await _handleConnection(beamSocket);
+            // Not trusted — send reject
+            client.add(
+              BinaryHeader(
+                magic: BinaryHeader.magicNumber,
+                op: BinaryHeader.opReject,
+                fileSize: 0,
+                fileName: '',
+              ).encode(),
+            );
+            client.destroy();
+            _activeSockets.remove(client);
           }
           break;
 
@@ -134,13 +150,19 @@ class TransferServer {
     }
   }
 
-  Future<void> _handleFileReceive(BeamSocket beamSocket, BinaryHeader header, String ip, int port) async {
+  Future<void> _handleFileReceive(
+    BeamSocket beamSocket,
+    BinaryHeader header,
+    String ip,
+    int port,
+  ) async {
     final client = beamSocket.socket;
     Directory directory;
     if (Platform.isAndroid) {
       directory = await android_storage.StorageHelper.getDownloadDirectory();
     } else if (Platform.isLinux) {
-      directory = await linux_storage.StorageHelper.getDefaultDownloadDirectory();
+      directory =
+          await linux_storage.StorageHelper.getDefaultDownloadDirectory();
     } else {
       directory = await getApplicationDocumentsDirectory();
     }
@@ -148,28 +170,26 @@ class TransferServer {
     ReceivePort? mainReceivePort;
 
     try {
-      final isTrusted = await BeamPairing().isTrusted(ip);
+      final isTrusted = await BeamPairing.instance.isTrusted(ip);
       if (!isTrusted) {
-        // If they didn't send OP_PAIR but we require trust, try pairing flow
-        final result = await BeamPairing().respondToPairing(beamSocket, header.deviceName.isNotEmpty ? header.deviceName : header.fileName);
-        if (result != PairingResult.success) {
-          _eventController.add(TransferEvent(
+        _eventController.add(
+          TransferEvent(
             status: TransferEventType.failed,
-            error: 'Device not trusted and pairing failed.',
+            error: 'Device not trusted.',
             fileName: header.fileName,
             senderIp: ip,
-          ));
-          print('[Resource] RESOURCE_CLOSE Socket (trust failed)');
-          client.destroy();
-          _activeSockets.remove(client);
-          return;
-        }
+          ),
+        );
+        print('[Resource] RESOURCE_CLOSE Socket (trust failed)');
+        client.destroy();
+        _activeSockets.remove(client);
+        return;
       }
 
       print('[Resource] RESOURCE_OPEN ReceivePort (main)');
       mainReceivePort = ReceivePort();
       await Isolate.spawn(
-        _isolateWorker, 
+        _isolateWorker,
         _IsolateArgs(mainReceivePort.sendPort, saveDir, ip),
       );
 
@@ -181,9 +201,13 @@ class TransferServer {
         } else if (message is TransferEvent) {
           _eventController.add(message);
           if (message.status == TransferEventType.started) {
-            print('[Diagnostics] TRANSFER_STARTED id=${header.fileName} ip=$ip port=$port');
+            print(
+              '[Diagnostics] TRANSFER_STARTED id=${header.fileName} ip=$ip port=$port',
+            );
           } else if (message.status == TransferEventType.completed) {
-            print('[Diagnostics] TRANSFER_COMPLETED id=${header.fileName} ip=$ip port=$port');
+            print(
+              '[Diagnostics] TRANSFER_COMPLETED id=${header.fileName} ip=$ip port=$port',
+            );
           }
         } else if (message is Map && message['action'] == 'send') {
           client.add(message['data'] as Uint8List);
@@ -245,6 +269,7 @@ void _isolateWorker(_IsolateArgs args) async {
   int bytesReceived = 0;
   List<int> checksumBuffer = [];
 
+  DateTime lastProgressTime = DateTime.now();
   final buffer = BytesBuilder();
 
   Future<void> cleanup() async {
@@ -280,35 +305,41 @@ void _isolateWorker(_IsolateArgs args) async {
           header = BinaryHeader.decode(Uint8List.fromList(headerData));
           isHeaderReceived = true;
 
-          if (header.magic != BinaryHeader.magicNumber || header.op != BinaryHeader.opSend) {
+          if (header.magic != BinaryHeader.magicNumber ||
+              header.op != BinaryHeader.opSend) {
             throw FormatException('Invalid header magic or operation');
           }
 
-          final partialPath = p.join(args.saveDir, '${header.fileName}.partial');
+          final partialPath = p.join(
+            args.saveDir,
+            '${header.fileName}.partial',
+          );
           partialFile = File(partialPath);
           print('[Resource] RESOURCE_OPEN fileSink: $partialPath');
           fileSink = partialFile.openWrite();
           hasPartialFile = true;
 
-          mainSendPort.send(TransferEvent(
-            status: TransferEventType.started,
-            totalBytes: header.fileSize,
-            fileName: header.fileName,
-            senderIp: args.senderIp,
-          ));
+          mainSendPort.send(
+            TransferEvent(
+              status: TransferEventType.started,
+              totalBytes: header.fileSize,
+              fileName: header.fileName,
+              senderIp: args.senderIp,
+            ),
+          );
 
           // Put remaining bytes back into buffer
           final remaining = allData.sublist(BinaryHeader.headerSize);
           if (remaining.isNotEmpty) {
-             buffer.add(remaining);
+            buffer.add(remaining);
           }
         }
-      } 
-      
+      }
+
       if (isHeaderReceived && buffer.isNotEmpty) {
         final currentData = buffer.takeBytes();
         int neededForFile = header.fileSize - bytesReceived;
-        
+
         if (neededForFile > 0) {
           if (currentData.length <= neededForFile) {
             fileSink.add(currentData);
@@ -322,13 +353,20 @@ void _isolateWorker(_IsolateArgs args) async {
             final checksumData = currentData.sublist(neededForFile);
             checksumBuffer.addAll(checksumData);
           }
-          mainSendPort.send(TransferEvent(
-            status: TransferEventType.progress,
-            bytesTransferred: bytesReceived,
-            totalBytes: header.fileSize,
-            fileName: header.fileName,
-            senderIp: args.senderIp,
-          ));
+          
+          final now = DateTime.now();
+          if (now.difference(lastProgressTime).inMilliseconds >= 50) {
+            lastProgressTime = now;
+            mainSendPort.send(
+              TransferEvent(
+                status: TransferEventType.progress,
+                bytesTransferred: bytesReceived,
+                totalBytes: header.fileSize,
+                fileName: header.fileName,
+                senderIp: args.senderIp,
+              ),
+            );
+          }
         } else {
           // File data is already complete; this is checksum data
           checksumBuffer.addAll(currentData);
@@ -337,7 +375,7 @@ void _isolateWorker(_IsolateArgs args) async {
         // Check if we have received the full checksum (64 bytes) after file completes
         if (bytesReceived == header.fileSize && checksumBuffer.length >= 64) {
           final receivedChecksum = utf8.decode(checksumBuffer.sublist(0, 64));
-          
+
           print('[Resource] RESOURCE_CLOSE fileSink (success)');
           await fileSink.close();
           hasPartialFile = false;
@@ -346,7 +384,7 @@ void _isolateWorker(_IsolateArgs args) async {
           if (computedChecksum == receivedChecksum) {
             final finalPath = p.join(args.saveDir, header.fileName);
             await partialFile.rename(finalPath);
-            
+
             // Send ACK
             final ackHeader = BinaryHeader(
               magic: BinaryHeader.magicNumber,
@@ -356,18 +394,20 @@ void _isolateWorker(_IsolateArgs args) async {
             );
             mainSendPort.send({'action': 'send', 'data': ackHeader.encode()});
 
-            mainSendPort.send(TransferEvent(
-              status: TransferEventType.completed,
-              bytesTransferred: bytesReceived,
-              totalBytes: header.fileSize,
-              fileName: header.fileName,
-              filePath: finalPath,
-              senderIp: args.senderIp,
-            ));
+            mainSendPort.send(
+              TransferEvent(
+                status: TransferEventType.completed,
+                bytesTransferred: bytesReceived,
+                totalBytes: header.fileSize,
+                fileName: header.fileName,
+                filePath: finalPath,
+                senderIp: args.senderIp,
+              ),
+            );
           } else {
             // Checksum mismatch
             await partialFile.delete();
-            
+
             // Send REJECT
             final rejectHeader = BinaryHeader(
               magic: BinaryHeader.magicNumber,
@@ -375,14 +415,19 @@ void _isolateWorker(_IsolateArgs args) async {
               fileSize: 0,
               fileName: '',
             );
-            mainSendPort.send({'action': 'send', 'data': rejectHeader.encode()});
+            mainSendPort.send({
+              'action': 'send',
+              'data': rejectHeader.encode(),
+            });
 
-            mainSendPort.send(TransferEvent(
-              status: TransferEventType.failed,
-              error: 'Checksum mismatch',
-              fileName: header.fileName,
-              senderIp: args.senderIp,
-            ));
+            mainSendPort.send(
+              TransferEvent(
+                status: TransferEventType.failed,
+                error: 'Checksum mismatch',
+                fileName: header.fileName,
+                senderIp: args.senderIp,
+              ),
+            );
           }
           break; // Done with this connection
         }
@@ -390,12 +435,11 @@ void _isolateWorker(_IsolateArgs args) async {
     }
   } catch (e) {
     if (hasPartialFile && await partialFile.exists()) {
-       await partialFile.delete();
+      await partialFile.delete();
     }
-    mainSendPort.send(TransferEvent(
-      status: TransferEventType.failed,
-      error: e.toString(),
-    ));
+    mainSendPort.send(
+      TransferEvent(status: TransferEventType.failed, error: e.toString()),
+    );
   } finally {
     await cleanup();
     mainSendPort.send({'action': 'close'});

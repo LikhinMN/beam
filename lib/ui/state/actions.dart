@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'package:pico/pico.dart';
 import 'package:beam/core/discovery.dart';
+import 'package:beam/core/app_services.dart';
 import 'app_state.dart';
 import 'store.dart';
 import 'package:beam/core/transfer_history.dart';
+import 'package:beam/core/peer_state.dart';
 
 /// Actions to mutate the global state.
 /// All state mutations must go through these functions.
@@ -30,6 +32,12 @@ void setPeers(List<BeamPeer> peers) {
   store.set((state) => state.copyWith(peers: peers));
 }
 
+void setPeerState(String peerId, PeerState state) {
+  final currentStates = Map<String, PeerState>.from(store.state.peerStates);
+  currentStates[peerId] = state;
+  store.set((s) => s.copyWith(peerStates: currentStates));
+}
+
 Timer? _scanTimer;
 
 void setScanning(bool value) {
@@ -42,29 +50,46 @@ void setScanning(bool value) {
   }
 }
 
+Future<void> refreshDiscovery() async {
+  // Stop existing instance first — await it fully
+  await discovery.stopScanning();
+  // Clear stale peers
+  store.set((s) => s.copyWith(peers: [], isScanning: true));
+  // Small delay to let mDNS cache clear
+  await Future.delayed(const Duration(milliseconds: 300));
+  // Start fresh single instance
+  await discovery.startScanning();
+  // Auto-reset scanning indicator after 5 seconds
+  Future.delayed(const Duration(seconds: 5), () {
+    store.set((s) => s.copyWith(isScanning: false));
+  });
+}
+
 void selectPeer(BeamPeer? peer) {
-  store.set((state) => state.copyWith(
-    selectedPeer: peer,
-    clearSelectedPeer: peer == null,
-  ));
+  store.set(
+    (state) =>
+        state.copyWith(selectedPeer: peer, clearSelectedPeer: peer == null),
+  );
 }
 
 void upsertTransfer(TransferItem item, {String? peerName, String? peerIp}) {
   final currentTransfers = List<TransferItem>.from(store.state.transfers);
   final index = currentTransfers.indexWhere((t) => t.id == item.id);
-  
+
   if (index >= 0) {
     currentTransfers[index] = item;
   } else {
     currentTransfers.insert(0, item);
   }
-  
+
   store.set((state) => state.copyWith(transfers: currentTransfers));
 
   if (item.status != TransferStatus.active) {
-    TransferHistory.instance.record(item, peerName ?? 'Unknown', peerIp ?? '0.0.0.0').then((_) {
-      loadHistory();
-    });
+    TransferHistory.instance
+        .record(item, peerName ?? 'Unknown', peerIp ?? '0.0.0.0')
+        .then((_) {
+          loadHistory();
+        });
   }
 
   // If completed, schedule removal after 5 seconds
@@ -83,7 +108,9 @@ Future<void> loadHistory() async {
     final entries = await TransferHistory.instance.getAll();
     store.set((state) => state.copyWith(history: AsyncData(entries)));
   } catch (e) {
-    store.set((state) => state.copyWith(history: AsyncError(e, StackTrace.current)));
+    store.set(
+      (state) => state.copyWith(history: AsyncError(e, StackTrace.current)),
+    );
   }
 }
 
@@ -93,19 +120,20 @@ Future<void> clearHistory() async {
 }
 
 void setFirewallError(String? message) {
-  store.set((state) => state.copyWith(
-    firewallError: message,
-    clearFirewallError: message == null,
-  ));
+  store.set(
+    (state) => state.copyWith(
+      firewallError: message,
+      clearFirewallError: message == null,
+    ),
+  );
 }
 
-void setPairingState(AsyncValue<void> state) {
-  store.set((s) => s.copyWith(pairingState: state));
-}
 
-void setIncomingPIN(String? pin) {
-  store.set((state) => state.copyWith(
-    incomingPIN: pin,
-    clearIncomingPIN: pin == null,
-  ));
+void setIncomingRequest(IncomingRequest? request) {
+  store.set(
+    (state) => state.copyWith(
+      incomingRequest: request,
+      clearIncomingRequest: request == null,
+    ),
+  );
 }

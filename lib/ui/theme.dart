@@ -54,18 +54,14 @@ final ThemeData beamTheme = ThemeData(
   cardTheme: CardThemeData(
     color: BeamColors.surface,
     elevation: 0,
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(12),
-    ),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
   ),
   elevatedButtonTheme: ElevatedButtonThemeData(
     style: ElevatedButton.styleFrom(
       backgroundColor: BeamColors.accent,
       foregroundColor: BeamColors.textPrimary,
       elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       textStyle: BeamTextStyles.body.copyWith(fontWeight: FontWeight.w600),
     ),
@@ -73,16 +69,12 @@ final ThemeData beamTheme = ThemeData(
   textButtonTheme: TextButtonThemeData(
     style: TextButton.styleFrom(
       foregroundColor: BeamColors.accent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
     ),
   ),
   dialogTheme: DialogThemeData(
     backgroundColor: BeamColors.surface,
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(12),
-    ),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
   ),
   floatingActionButtonTheme: const FloatingActionButtonThemeData(
     backgroundColor: BeamColors.accent,

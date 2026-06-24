@@ -7,7 +7,9 @@ class SpeedCalculator {
     _samples.add(_Sample(now, bytesTransferred));
 
     // Remove samples older than 2 seconds to maintain a 2-second sliding window
-    _samples.removeWhere((s) => now.difference(s.timestamp).inMilliseconds > 2000);
+    _samples.removeWhere(
+      (s) => now.difference(s.timestamp).inMilliseconds > 2000,
+    );
   }
 
   /// Returns the current speed in bytes per second based on the 2s sliding window.
@@ -15,10 +17,11 @@ class SpeedCalculator {
     if (_samples.length < 2) return 0;
     final first = _samples.first;
     final last = _samples.last;
-    
-    final durationSecs = last.timestamp.difference(first.timestamp).inMilliseconds / 1000.0;
+
+    final durationSecs =
+        last.timestamp.difference(first.timestamp).inMilliseconds / 1000.0;
     if (durationSecs <= 0) return 0;
-    
+
     final bytesDiff = last.bytes - first.bytes;
     return bytesDiff / durationSecs;
   }

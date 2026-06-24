@@ -8,7 +8,9 @@ class StorageHelper {
   static Future<Directory> getDownloadDirectory() async {
     try {
       if (Platform.isAndroid) {
-        final dirs = await getExternalStorageDirectories(type: StorageDirectory.downloads);
+        final dirs = await getExternalStorageDirectories(
+          type: StorageDirectory.downloads,
+        );
         if (dirs != null && dirs.isNotEmpty) {
           return dirs.first;
         }
@@ -16,9 +18,8 @@ class StorageHelper {
     } catch (e) {
       print('Failed to get external downloads directory: $e');
     }
-    
+
     // Fallback if external downloads folder is not accessible
     return await getApplicationDocumentsDirectory();
   }
-
 }

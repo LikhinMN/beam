@@ -2,173 +2,140 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:beam/core/protocol.dart';
+import 'package:beam/core/settings_store.dart';
 
-enum PairingEventType { pinGenerated, waitingForPin, pairingSuccess, pairingFailed, pairingTimeout }
+enum PairingResult { success, failed, timeout, error }
 
-class PairingEvent {
-  final PairingEventType type;
-  final String? pin;
-  final String? message;
-  PairingEvent(this.type, {this.pin, this.message});
+class TrustedDevice {
+  final String deviceId;
+  final String deviceName;
+  final String ip;
+  final String secret;
+
+  TrustedDevice({
+    required this.deviceId,
+    required this.deviceName,
+    required this.ip,
+    required this.secret,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'deviceId': deviceId,
+    'deviceName': deviceName,
+    'ip': ip,
+    'secret': secret,
+    'pairedAt': DateTime.now().toIso8601String(),
+  };
+
+  factory TrustedDevice.fromJson(Map<String, dynamic> json) {
+    return TrustedDevice(
+      deviceId: json['deviceId'] ?? '',
+      deviceName: json['deviceName'] ?? '',
+      ip: json['ip'] ?? '',
+      secret: json['secret'] ?? '',
+    );
+  }
 }
 
-enum PairingResult { success, rejected, timeout, error }
-
-/// Handles PIN-based pairing and trust management.
 class BeamPairing {
   static final BeamPairing _instance = BeamPairing._internal();
+  static BeamPairing get instance => _instance;
   factory BeamPairing() => _instance;
   BeamPairing._internal();
 
   static const String _storeKey = 'beam_trusted_devices';
+
+  late final String sessionSecret;
   
-  final _eventsController = StreamController<PairingEvent>.broadcast();
-  Stream<PairingEvent> get pairingEvents => _eventsController.stream;
+  final StreamController<TrustedDevice> _devicePairedController = StreamController<TrustedDevice>.broadcast();
+  Stream<TrustedDevice> get onDevicePaired => _devicePairedController.stream;
 
-  Completer<String>? _pinCompleter;
-
-  /// Generates a random 6-digit PIN.
-  String generatePIN() {
-    final random = Random.secure();
-    return (random.nextInt(900000) + 100000).toString(); // 100000 to 999999
+  void init() {
+    sessionSecret = List.generate(32, (_) =>
+      Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0')
+    ).join();
   }
 
-  /// Called by the UI on the sender side to submit the user-entered PIN.
-  void submitPin(String pin) {
-    if (_pinCompleter != null && !_pinCompleter!.isCompleted) {
-      _pinCompleter!.complete(pin);
-    }
-  }
-
-  /// Sender side pairing flow.
-  Future<PairingResult> initiatePairing(BeamSocket beamSocket, String deviceName) async {
+  // Called by scanner after reading QR
+  Future<PairingResult> initiateQRPairing(
+    String ip, int port, String theirSecret, 
+    String theirDeviceId, String theirDeviceName
+  ) async {
     try {
-      // 1. Send OP_PAIR + deviceName
-      final pairHeader = BinaryHeader(
+      final socket = await Socket.connect(ip, port, timeout: const Duration(seconds: 10));
+      final beamSocket = BeamSocket(socket);
+      
+      // Send OP_PAIR with our identity + their secret as challenge
+      socket.add(BinaryHeader(
         magic: BinaryHeader.magicNumber,
         op: BinaryHeader.opPair,
         fileSize: 0,
-        fileName: deviceName,
-      );
-      beamSocket.socket.add(pairHeader.encode());
-      await beamSocket.socket.flush();
+        fileName: '',
+        deviceId: SettingsStore.instance.deviceId,
+        deviceName: SettingsStore.instance.deviceName,
+        secret: theirSecret,  // echo their secret back as proof of scan
+      ).encode());
+      await socket.flush();
 
-      // 2. Wait for PIN challenge (OP_PIN from receiver)
-      final challengeHeader = await beamSocket.readHeader(timeout: const Duration(seconds: 10));
-      if (challengeHeader.op != BinaryHeader.opPin) {
-        throw Exception('Expected OP_PIN challenge');
-      }
-
-      // 3. User enters PIN
-      _eventsController.add(PairingEvent(PairingEventType.waitingForPin));
-      _pinCompleter = Completer<String>();
-      
-      final String pin;
-      try {
-        pin = await _pinCompleter!.future.timeout(const Duration(seconds: 60));
-      } catch (e) {
-        _eventsController.add(PairingEvent(PairingEventType.pairingTimeout));
-        return PairingResult.timeout;
-      }
-
-      // 4. Send PIN to receiver
-      final pinHeader = BinaryHeader(
-        magic: BinaryHeader.magicNumber,
-        op: BinaryHeader.opPin,
-        fileSize: 0,
-        fileName: pin,
-      );
-      beamSocket.socket.add(pinHeader.encode());
-      await beamSocket.socket.flush();
-
-      // 5. Wait for PAIR_OK or PAIR_REJECT
-      final resultHeader = await beamSocket.readHeader(timeout: const Duration(seconds: 10));
-      if (resultHeader.op == BinaryHeader.opPairOk) {
-        _eventsController.add(PairingEvent(PairingEventType.pairingSuccess));
-        await _trustDevice(beamSocket.socket.remoteAddress.address, resultHeader.fileName.isNotEmpty ? resultHeader.fileName : 'Receiver');
+      final response = await beamSocket.readHeader(timeout: const Duration(seconds: 10));
+      if (response.op == BinaryHeader.opPairOk) {
+        // Store as trusted
+        await _storeTrusted(TrustedDevice(
+          deviceId: theirDeviceId,
+          deviceName: theirDeviceName,
+          ip: ip,
+          secret: theirSecret,
+        ));
+        socket.destroy();
         return PairingResult.success;
-      } else {
-        _eventsController.add(PairingEvent(PairingEventType.pairingFailed, message: 'Rejected by receiver'));
-        return PairingResult.rejected;
       }
+      socket.destroy();
+      return PairingResult.failed;
     } on TimeoutException {
-      _eventsController.add(PairingEvent(PairingEventType.pairingTimeout));
       return PairingResult.timeout;
     } catch (e) {
-      _eventsController.add(PairingEvent(PairingEventType.pairingFailed, message: e.toString()));
       return PairingResult.error;
     }
   }
 
-  /// Receiver side pairing flow.
-  /// Expects the caller to have already verified the initial OP_PAIR header
-  /// and passes the [senderName] extracted from it.
-  Future<PairingResult> respondToPairing(BeamSocket beamSocket, String senderName) async {
+  // Called by server when OP_PAIR arrives
+  Future<void> respondToQRPairing(
+    BeamSocket socket, BinaryHeader header
+  ) async {
     try {
-      // 1. Generate PIN and show via stream
-      final pin = generatePIN();
-      _eventsController.add(PairingEvent(PairingEventType.pinGenerated, pin: pin));
-
-      // 2. Send PIN challenge (OP_PIN)
-      final challengeHeader = BinaryHeader(
-        magic: BinaryHeader.magicNumber,
-        op: BinaryHeader.opPin,
-        fileSize: 0,
-        fileName: 'CHALLENGE',
-      );
-      beamSocket.socket.add(challengeHeader.encode());
-      await beamSocket.socket.flush();
-
-      // 3. Wait for PIN from sender
-      final pinHeader = await beamSocket.readHeader(timeout: const Duration(seconds: 60));
-      if (pinHeader.op != BinaryHeader.opPin) {
-        throw Exception('Expected OP_PIN');
-      }
-
-      final receivedPin = pinHeader.fileName.trim();
-      
-      // 4. Validate PIN
-      if (receivedPin == pin) {
-        final okHeader = BinaryHeader(
+      // Validate: the secret they sent must match our sessionSecret
+      if (header.secret == sessionSecret) {
+        await _storeTrusted(TrustedDevice(
+          deviceId: header.deviceId,
+          deviceName: header.deviceName,
+          ip: socket.socket.remoteAddress.address,
+          secret: sessionSecret,
+        ));
+        socket.socket.add(BinaryHeader(
           magic: BinaryHeader.magicNumber,
           op: BinaryHeader.opPairOk,
           fileSize: 0,
-          fileName: 'ReceiverDevice', 
-        );
-        beamSocket.socket.add(okHeader.encode());
-        await beamSocket.socket.flush();
-
-        await _trustDevice(beamSocket.socket.remoteAddress.address, senderName);
-        _eventsController.add(PairingEvent(PairingEventType.pairingSuccess));
-        return PairingResult.success;
+          fileName: '',
+        ).encode());
+        await socket.socket.flush();
       } else {
-        final rejectHeader = BinaryHeader(
+        socket.socket.add(BinaryHeader(
           magic: BinaryHeader.magicNumber,
           op: BinaryHeader.opPairReject,
           fileSize: 0,
           fileName: '',
-        );
-        beamSocket.socket.add(rejectHeader.encode());
-        await beamSocket.socket.flush();
-
-        _eventsController.add(PairingEvent(PairingEventType.pairingFailed, message: 'Invalid PIN'));
-        return PairingResult.rejected;
+        ).encode());
+        await socket.socket.flush();
       }
-    } on TimeoutException {
-      _eventsController.add(PairingEvent(PairingEventType.pairingTimeout));
-      return PairingResult.timeout;
     } catch (e) {
-      _eventsController.add(PairingEvent(PairingEventType.pairingFailed, message: e.toString()));
-      return PairingResult.error;
+      print('Error responding to QR pairing: $e');
     }
   }
 
-
   /// Checks the trusted store for a matching entry.
-  Future<bool> isTrusted(String ip, {String? deviceName}) async {
+  Future<bool> isTrusted(String ip, [String? deviceName]) async {
     final prefs = await SharedPreferences.getInstance();
     final listStr = prefs.getString(_storeKey);
     if (listStr == null) return false;
@@ -190,7 +157,7 @@ class BeamPairing {
   }
 
   /// Stores a trusted device.
-  Future<void> _trustDevice(String ip, String deviceName) async {
+  Future<void> _storeTrusted(TrustedDevice device) async {
     final prefs = await SharedPreferences.getInstance();
     List<dynamic> list = [];
     final listStr = prefs.getString(_storeKey);
@@ -201,16 +168,12 @@ class BeamPairing {
     }
 
     // Remove old entries with same IP to avoid duplicates
-    list.removeWhere((item) => item['ip'] == ip);
+    list.removeWhere((item) => item['ip'] == device.ip);
 
-    list.add({
-      'deviceName': deviceName,
-      'ip': ip,
-      'publicKey': '',
-      'pairedAt': DateTime.now().toIso8601String(),
-    });
+    list.add(device.toJson());
 
     await prefs.setString(_storeKey, jsonEncode(list));
+    _devicePairedController.add(device);
   }
 
   /// Revokes trust for a given device name.
