@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:pico/pico.dart';
 import 'package:beam/core/discovery.dart';
@@ -5,6 +6,12 @@ import 'package:beam/ui/state/app_state.dart';
 import 'package:beam/ui/state/store.dart';
 import 'package:beam/ui/state/actions.dart' as actions;
 import 'package:beam/ui/theme.dart';
+import 'package:beam/core/peer_state.dart';
+import 'package:beam/core/pairing.dart';
+import 'package:beam/core/protocol.dart';
+import 'package:beam/core/settings_store.dart';
+import 'package:beam/ui/widgets/file_send_sheet.dart';
+import 'peer_card_widget.dart';
 
 /// A widget that displays a list of discovered peers.
 class PeerListWidget extends StatelessWidget {
@@ -12,14 +19,79 @@ class PeerListWidget extends StatelessWidget {
 
   const PeerListWidget({super.key, required this.discovery});
 
+  void _handlePair(BuildContext context, BeamPeer peer) async {
+    actions.setPeerState(peer.id, PeerState.pairing);
+    actions.setPairingState(const AsyncLoading());
+    try {
+      final socket = await Socket.connect(peer.ip, peer.port, timeout: const Duration(seconds: 5));
+      final beamSocket = BeamSocket(socket);
+      final pairing = BeamPairing();
+      final result = await pairing.initiatePairing(beamSocket, SettingsStore.instance.deviceName);
+      if (result == PairingResult.success) {
+        actions.setPeerState(peer.id, PeerState.trusted);
+      } else {
+        actions.setPeerState(peer.id, PeerState.discovered);
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pairing failed. Try again.')));
+        }
+      }
+      socket.destroy();
+    } catch (e) {
+      actions.setPeerState(peer.id, PeerState.discovered);
+      actions.setPairingState(AsyncError(e, StackTrace.current));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pairing failed. Try again.')));
+      }
+    }
+  }
+
+  void _handleConnect(BuildContext context, BeamPeer peer) async {
+    actions.setPeerState(peer.id, PeerState.connecting);
+    try {
+      final socket = await Socket.connect(peer.ip, peer.port, timeout: const Duration(seconds: 5));
+      final header = BinaryHeader(
+        magic: BinaryHeader.magicNumber,
+        op: BinaryHeader.opConnect,
+        fileSize: 0,
+        fileName: '',
+      );
+      socket.add(header.encode());
+      await socket.flush();
+      
+      actions.setPeerState(peer.id, PeerState.connected);
+      if (context.mounted) {
+        _handleCardTap(context, peer);
+      }
+      // Assuming socket should stay open or can be closed if it's stateless connection
+      socket.destroy();
+    } catch (e) {
+      actions.setPeerState(peer.id, PeerState.trusted);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not connect to ${peer.name}. Make sure both devices are on the same Wi-Fi.')));
+      }
+    }
+  }
+
+  void _handleCardTap(BuildContext context, BeamPeer peer) {
+    actions.selectPeer(peer);
+  }
+
+  void _handleCancelTransfer(BuildContext context, BeamPeer peer, TransferItem? transfer) {
+    // Ideally cancel the actual transfer using client or isolate.
+    // For now, reset UI state.
+    actions.setPeerState(peer.id, PeerState.connected);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return PicoBuilder<AppState, ({List<BeamPeer> peers, bool isScanning, BeamPeer? selectedPeer})>(
+    return PicoBuilder<AppState, ({List<BeamPeer> peers, bool isScanning, BeamPeer? selectedPeer, Map<String, PeerState> peerStates, List<TransferItem> transfers})>(
       store: store,
       selector: (state) => (
         peers: state.peers, 
         isScanning: state.isScanning,
         selectedPeer: state.selectedPeer,
+        peerStates: state.peerStates,
+        transfers: state.transfers,
       ),
       builder: (context, data) {
         return Column(
@@ -42,13 +114,7 @@ class PeerListWidget extends StatelessWidget {
                       ),
                     IconButton(
                       icon: const Icon(Icons.refresh, color: BeamColors.textPrimary),
-                      onPressed: () async {
-                        actions.setScanning(false);
-                        await discovery.stopScanning();
-                        actions.setPeers([]);
-                        await discovery.startScanning();
-                        actions.setScanning(true);
-                      },
+                      onPressed: actions.refreshDiscovery,
                     ),
                   ],
                 ),
@@ -64,11 +130,17 @@ class PeerListWidget extends StatelessWidget {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (context, index) {
                     final peer = data.peers[index];
-                    final isSelected = data.selectedPeer?.ip == peer.ip;
-                    return _PeerCard(
+                    final state = data.peerStates[peer.id] ?? PeerState.discovered;
+                    final activeTransfer = data.transfers.where((t) => t.status == TransferStatus.active).firstOrNull;
+
+                    return PeerCardWidget(
                       peer: peer,
-                      isSelected: isSelected,
-                      onTap: () => actions.selectPeer(peer),
+                      state: state,
+                      activeTransfer: activeTransfer,
+                      onPairTap: () => _handlePair(context, peer),
+                      onConnectTap: () => _handleConnect(context, peer),
+                      onCardTap: () => _handleCardTap(context, peer),
+                      onCancelTransferTap: () => _handleCancelTransfer(context, peer, activeTransfer),
                     );
                   },
                 ),
@@ -172,60 +244,5 @@ class PeerListWidget extends StatelessWidget {
         );
       },
     );
-  }
 }
-
-class _PeerCard extends StatelessWidget {
-  final BeamPeer peer;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _PeerCard({required this.peer, required this.isSelected, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    IconData platformIcon = Icons.device_unknown;
-    if (peer.platform == 'android') platformIcon = Icons.phone_android;
-    if (peer.platform == 'linux') platformIcon = Icons.computer;
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: BeamColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected ? BeamColors.accent : Colors.transparent,
-            width: 2,
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(platformIcon, color: BeamColors.textSecondary, size: 32),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(peer.name, style: BeamTextStyles.body.copyWith(fontWeight: FontWeight.w600)),
-                  Text(peer.ip, style: BeamTextStyles.caption),
-                ],
-              ),
-            ),
-            if (peer.isOnline)
-              Container(
-                width: 12,
-                height: 12,
-                decoration: const BoxDecoration(
-                  color: BeamColors.success,
-                  shape: BoxShape.circle,
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
 }
