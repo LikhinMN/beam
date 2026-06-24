@@ -10,17 +10,17 @@ import 'package:beam/core/utils.dart';
 import 'package:beam/core/transfer_client.dart';
 import 'package:beam/core/speed_calculator.dart';
 import 'package:beam/ui/state/actions.dart' as actions;
-import 'package:beam/core/pairing.dart';
-import 'package:beam/core/settings_store.dart';
-import 'package:beam/core/protocol.dart';
+import 'package:beam/core/peer_state.dart';
+import 'package:beam/android/file_picker_helper.dart';
 
-/// A panel (bottom sheet on Android, side panel on Linux) to review and send files.
 class FileSendSheet extends StatefulWidget {
+  final BeamPeer peer;
   final List<File> initialFiles;
   final VoidCallback onDismiss;
 
   const FileSendSheet({
     super.key,
+    required this.peer,
     required this.initialFiles,
     required this.onDismiss,
   });
@@ -31,6 +31,7 @@ class FileSendSheet extends StatefulWidget {
 
 class _FileSendSheetState extends State<FileSendSheet> {
   late List<File> _files;
+  bool _isDismissing = false;
 
   @override
   void initState() {
@@ -38,47 +39,43 @@ class _FileSendSheetState extends State<FileSendSheet> {
     _files = List<File>.from(widget.initialFiles);
   }
 
+  void _addFiles() async {
+    final newFiles = await FilePickerHelper.pickFiles();
+    if (newFiles.isNotEmpty) {
+      setState(() {
+        _files.addAll(newFiles);
+      });
+    }
+  }
+
   void _removeFile(int index) {
     setState(() {
       _files.removeAt(index);
     });
-    if (_files.isEmpty) {
+  }
+
+  void _disconnect() {
+    actions.setPeerState(widget.peer.id, PeerState.trusted);
+    if (!_isDismissing) {
+      _isDismissing = true;
       widget.onDismiss();
     }
   }
 
-  void _sendFiles(BeamPeer peer) async {
-    final isTrusted = await BeamPairing().isTrusted(peer.ip);
-    BeamSocket? pairingSocket;
-    
-    if (!isTrusted) {
-      actions.setPairingState(const AsyncLoading());
-      try {
-        final socket = await Socket.connect(peer.ip, peer.port);
-        pairingSocket = BeamSocket(socket);
-        final result = await BeamPairing().initiatePairing(pairingSocket, SettingsStore.instance.deviceName);
-        if (!mounted) return;
-        if (result != PairingResult.success) {
-          pairingSocket.socket.destroy();
-          return;
-        }
-      } catch (e) {
-        actions.setPairingState(AsyncError(Exception(e.toString()), StackTrace.current));
-        pairingSocket?.socket.destroy();
-        return;
-      }
-    }
+  void _sendFiles() async {
+    if (_files.isEmpty) return;
 
-    // Dismiss the sheet before starting long transfers
-    if (!mounted) return;
-    widget.onDismiss();
+    actions.setPeerState(widget.peer.id, PeerState.transferring);
+
+    int successCount = 0;
+    bool anyFailure = false;
 
     for (int i = 0; i < _files.length; i++) {
       final file = _files[i];
       final id = '${DateTime.now().millisecondsSinceEpoch}_${file.hashCode}';
       final size = file.lengthSync();
       final baseName = p.basename(file.path);
-      
+
       actions.upsertTransfer((
         id: id,
         fileName: baseName,
@@ -93,7 +90,7 @@ class _FileSendSheetState extends State<FileSendSheet> {
 
       final speedCalc = SpeedCalculator();
       final client = TransferClient();
-      
+
       client.events.listen((event) {
         TransferStatus status = TransferStatus.active;
         if (event.status.name == 'completed') status = TransferStatus.completed;
@@ -114,88 +111,100 @@ class _FileSendSheetState extends State<FileSendSheet> {
           errorReason: event.error,
         ));
       });
-      
-      // Pass the pairing socket only for the first file to reuse the connection
-      client.sendFile(peer.ip, peer.port, file, existingSocket: i == 0 ? pairingSocket : null);
+
+      try {
+        await client.sendFile(widget.peer.ip, widget.peer.port, file);
+        successCount++;
+      } catch (e) {
+        anyFailure = true;
+      }
+    }
+
+    if (mounted) {
+      actions.setPeerState(widget.peer.id, PeerState.connected);
+      if (anyFailure) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Transfer failed.')));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('✓ $successCount file(s) sent successfully')));
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return PicoBuilder<AppState, BeamPeer?>(
+    return PicoBuilder<AppState, PeerState>(
       store: store,
-      selector: (state) => state.selectedPeer,
-      builder: (context, selectedPeer) {
-        return Container(
-          color: BeamColors.surface,
-          padding: const EdgeInsets.all(24),
-          child: Column(
+      selector: (state) => state.peerStates[widget.peer.id] ?? PeerState.discovered,
+      builder: (context, peerState) {
+        // Auto-close if peer is no longer connected or transferring
+        if (peerState != PeerState.connected && peerState != PeerState.transferring) {
+          if (!_isDismissing) {
+            _isDismissing = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) widget.onDismiss();
+            });
+          }
+        }
+
+        return RepaintBoundary(
+          child: Container(
+            color: BeamColors.surface,
+            padding: const EdgeInsets.all(24),
+            child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Send Files', style: BeamTextStyles.headline),
+                  Text('Connected to ${widget.peer.name}', style: BeamTextStyles.headline.copyWith(fontSize: 18)),
                   IconButton(
                     icon: const Icon(Icons.close, color: BeamColors.textPrimary),
-                    onPressed: widget.onDismiss,
+                    onPressed: _disconnect,
                   ),
                 ],
               ),
               const SizedBox(height: 16),
-              if (selectedPeer != null)
-                Text(
-                  'To: ${selectedPeer.name} (${selectedPeer.ip})',
-                  style: BeamTextStyles.body.copyWith(color: BeamColors.accent),
-                )
-              else
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: BeamColors.error.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: BeamColors.error),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.error_outline, color: BeamColors.error),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Select a peer from the list to send files.',
-                          style: BeamTextStyles.caption.copyWith(color: BeamColors.error),
-                        ),
-                      ),
-                    ],
-                  ),
+              OutlinedButton.icon(
+                onPressed: _addFiles,
+                icon: const Icon(Icons.add, color: BeamColors.accent),
+                label: const Text('Add Files'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: BeamColors.accent,
+                  side: const BorderSide(color: BeamColors.accent),
                 ),
-              const SizedBox(height: 24),
+              ),
+              const SizedBox(height: 16),
               Expanded(
-                child: ListView.separated(
-                  itemCount: _files.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
-                    final file = _files[index];
-                    return _FileRow(
-                      file: file,
-                      onRemove: () => _removeFile(index),
-                    );
-                  },
-                ),
+                child: _files.isEmpty
+                    ? Center(child: Text('Add files to send', style: BeamTextStyles.body.copyWith(color: BeamColors.textSecondary)))
+                    : ListView.separated(
+                        itemCount: _files.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 12),
+                        itemBuilder: (context, index) {
+                          final file = _files[index];
+                          return _FileRow(
+                            file: file,
+                            onRemove: () => _removeFile(index),
+                          );
+                        },
+                      ),
               ),
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: selectedPeer == null || _files.isEmpty
-                      ? null
-                      : () => _sendFiles(selectedPeer),
-                  child: const Text('Send'),
+                  onPressed: _files.isEmpty || peerState != PeerState.connected ? null : _sendFiles,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: BeamColors.accent,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.grey,
+                  ),
+                  child: const Text('SEND'),
                 ),
               ),
             ],
           ),
-        );
+        ));
       },
     );
   }
@@ -235,7 +244,7 @@ class _FileRow extends StatelessWidget {
           ),
         ),
         IconButton(
-          icon: const Icon(Icons.remove_circle_outline, color: BeamColors.error),
+          icon: const Icon(Icons.close, color: BeamColors.error, size: 20),
           onPressed: onRemove,
         ),
       ],
