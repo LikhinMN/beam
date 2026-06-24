@@ -8,7 +8,7 @@
 
 A lightning-fast, cross-platform local file transfer application.
 
-![Beam Demo](assets/demo.gif)
+<img src="assets/demo.gif" width="100%" alt="Beam Demo" />
 
 ## 🚀 Features
 
