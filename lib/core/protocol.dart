@@ -9,18 +9,21 @@ enum TransferEventType {
   failed,
 }
 
-/// Event emitted during a file transfer.
 class TransferEvent {
   final TransferEventType status;
   final int bytesTransferred;
   final int totalBytes;
   final String? error;
+  final String? fileName;
+  final String? filePath;
 
   TransferEvent({
     required this.status,
     this.bytesTransferred = 0,
     this.totalBytes = 0,
     this.error,
+    this.fileName,
+    this.filePath,
   });
 }
 

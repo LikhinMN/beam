@@ -158,6 +158,7 @@ void _isolateWorker(_IsolateArgs args) async {
           mainSendPort.send(TransferEvent(
             status: TransferEventType.started,
             totalBytes: header.fileSize,
+            fileName: header.fileName,
           ));
 
           // Put remaining bytes back into buffer
@@ -189,6 +190,7 @@ void _isolateWorker(_IsolateArgs args) async {
             status: TransferEventType.progress,
             bytesTransferred: bytesReceived,
             totalBytes: header.fileSize,
+            fileName: header.fileName,
           ));
         } else {
           // File data is already complete; this is checksum data
@@ -220,6 +222,8 @@ void _isolateWorker(_IsolateArgs args) async {
               status: TransferEventType.completed,
               bytesTransferred: bytesReceived,
               totalBytes: header.fileSize,
+              fileName: header.fileName,
+              filePath: finalPath,
             ));
           } else {
             // Checksum mismatch
@@ -237,6 +241,7 @@ void _isolateWorker(_IsolateArgs args) async {
             mainSendPort.send(TransferEvent(
               status: TransferEventType.failed,
               error: 'Checksum mismatch',
+              fileName: header.fileName,
             ));
           }
           break; // Done with this connection
