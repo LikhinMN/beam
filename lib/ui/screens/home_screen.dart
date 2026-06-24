@@ -46,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onFabPressed() async {
     final files = await FilePickerHelper.pickFiles();
+    if (!mounted) return;
     if (files.isNotEmpty) {
       if (Platform.isAndroid) {
         showModalBottomSheet(

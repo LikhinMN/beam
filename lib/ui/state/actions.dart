@@ -8,20 +8,21 @@ import 'package:beam/core/transfer_history.dart';
 /// Actions to mutate the global state.
 /// All state mutations must go through these functions.
 
-void addPeer(BeamPeer peer) {
-  final currentPeers = List<BeamPeer>.from(store.state.peers);
-  final index = currentPeers.indexWhere((p) => p.ip == peer.ip);
-  if (index >= 0) {
-    currentPeers[index] = peer;
+void upsertPeer(BeamPeer peer) {
+  final existing = store.state.peers;
+  final idx = existing.indexWhere((p) => p.id == peer.id);
+  if (idx == -1) {
+    store.set((s) => s.copyWith(peers: [...s.peers, peer]));
   } else {
-    currentPeers.add(peer);
+    final updated = [...existing];
+    updated[idx] = peer;
+    store.set((s) => s.copyWith(peers: updated));
   }
-  store.set((state) => state.copyWith(peers: currentPeers));
 }
 
 void removePeer(BeamPeer peer) {
   final currentPeers = List<BeamPeer>.from(store.state.peers);
-  currentPeers.removeWhere((p) => p.ip == peer.ip);
+  currentPeers.removeWhere((p) => p.id == peer.id);
   store.set((state) => state.copyWith(peers: currentPeers));
 }
 

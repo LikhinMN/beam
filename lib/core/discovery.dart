@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:bonsoir/bonsoir.dart';
+import 'package:beam/ui/state/actions.dart' as actions;
 
 /// Represents a discovered Beam peer on the local network.
 class BeamPeer {
+  final String id;
   final String name;
   final String ip;
   final int port;
@@ -11,6 +13,7 @@ class BeamPeer {
   final bool isOnline;
 
   BeamPeer({
+    required this.id,
     required this.name,
     required this.ip,
     required this.port,
@@ -37,11 +40,7 @@ class BeamDiscovery {
   BonsoirDiscovery? _discovery;
   String? _selfDeviceId;
 
-  final _peers = <String, BeamPeer>{}; // Keyed by IP
-  final _peersController = StreamController<List<BeamPeer>>.broadcast();
-
-  /// Exposes a stream of discovered peers. Updates whenever a peer is found or lost.
-  Stream<List<BeamPeer>> get peers => _peersController.stream;
+  final resolvedServices = <String, BonsoirService>{};
 
   /// Starts advertising this device on the local network via mDNS.
   Future<void> startAdvertising(String deviceName, int port, String deviceId) async {
@@ -92,7 +91,15 @@ class BeamDiscovery {
         // Resolve the service to get IP and port
         event.service?.resolve(_discovery!.serviceResolver);
       } else if (event.type == BonsoirDiscoveryEventType.discoveryServiceResolved) {
-        _handleResolvedService(event.service as ResolvedBonsoirService);
+        final service = event.service as ResolvedBonsoirService;
+        final incomingId = service.attributes['id'];
+        final resolvedId = resolvedServices[service.name]?.attributes['id'];
+        // Ignore attribute updates that carry a different device's id
+        if (resolvedId != null && incomingId != resolvedId) return;
+        
+        resolvedServices[service.name] = service;
+        // Process off main thread to prevent jank
+        Future.microtask(() => _handleResolvedService(service));
       } else if (event.type == BonsoirDiscoveryEventType.discoveryServiceLost) {
         _handleLostService(event.service);
       }
@@ -105,28 +112,25 @@ class BeamDiscovery {
   Future<void> stopScanning() async {
     await _discovery?.stop();
     _discovery = null;
-    _peers.clear();
-    _peersController.add([]);
+    resolvedServices.clear();
+    actions.setPeers([]);
   }
 
   /// Processes a resolved mDNS service.
   void _handleResolvedService(ResolvedBonsoirService service) {
+    final serviceId = service.attributes['id'];
     // Exclude self by matching unique device ID
-    if (service.attributes['id'] == _selfDeviceId) return;
+    if (serviceId == _selfDeviceId) return;
 
     final Map<String, dynamic> json = service.toJson();
     final ip = json['host'] as String? ?? service.host ?? '';
     final port = service.port;
     if (ip.isEmpty || port == 0) return;
 
-    // Disambiguate names if multiple peers share the same name
-    String peerName = service.name;
-    final existingWithSameName = _peers.values.where((p) => p.name == service.name && p.ip != ip);
-    if (existingWithSameName.isNotEmpty) {
-      peerName = '${service.name} ($ip)';
-    }
+    final peerName = service.name;
 
     final peer = BeamPeer(
+      id: serviceId ?? service.name,
       name: peerName,
       ip: ip,
       port: service.port,
@@ -134,30 +138,32 @@ class BeamDiscovery {
       isOnline: true,
     );
 
-    _peers[ip] = peer;
-    print('addPeer called for $peerName at $ip:$port');
-    _peersController.add(_peers.values.toList());
+    actions.upsertPeer(peer);
   }
 
   /// Removes a peer from the list when its mDNS service is lost.
   void _handleLostService(BonsoirService? service) {
     if (service == null) return;
     
-    // The lost service may not have its IP resolved anymore, so we try to find it by name.
-    final matchingPeers = _peers.values.where((p) => p.name == service.name || p.name.startsWith('${service.name} ')).toList();
-    for (var peer in matchingPeers) {
-      _peers.remove(peer.ip);
-    }
+    final resolved = resolvedServices[service.name];
+    final id = resolved?.attributes['id'] ?? service.attributes['id'] ?? service.name;
     
-    if (matchingPeers.isNotEmpty) {
-      _peersController.add(_peers.values.toList());
-    }
+    final peer = BeamPeer(
+      id: id,
+      name: service.name,
+      ip: '',
+      port: 0,
+      platform: '',
+      isOnline: false,
+    );
+    
+    actions.removePeer(peer);
+    resolvedServices.remove(service.name);
   }
 
   /// Allows explicit removal of a peer (e.g. if a direct connection fails).
-  void removePeer(String ip) {
-    if (_peers.remove(ip) != null) {
-      _peersController.add(_peers.values.toList());
-    }
+  void removePeer(String id) {
+    final peer = BeamPeer(id: id, name: '', ip: '', port: 0, platform: '', isOnline: false);
+    actions.removePeer(peer);
   }
 }

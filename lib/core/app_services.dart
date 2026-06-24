@@ -98,16 +98,12 @@ Future<void> initAppServices() async {
   });
 
   // 5 & 6. Start mDNS advertising and scanning
-  discovery.peers.listen((peers) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      actions.setPeers(peers);
-    });
-  });
+  await discovery.startAdvertising(deviceName, port, deviceId);
   
-  await Future.wait([
-    discovery.startAdvertising(deviceName, port, deviceId),
-    discovery.startScanning(),
-  ]);
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    await Future.delayed(const Duration(milliseconds: 500));
+    await discovery.startScanning();
+  });
 }
 
 Future<void> shutdownAppServices() async {

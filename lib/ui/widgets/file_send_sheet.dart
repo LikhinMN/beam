@@ -12,6 +12,7 @@ import 'package:beam/core/speed_calculator.dart';
 import 'package:beam/ui/state/actions.dart' as actions;
 import 'package:beam/core/pairing.dart';
 import 'package:beam/core/settings_store.dart';
+import 'package:beam/core/protocol.dart';
 
 /// A panel (bottom sheet on Android, side panel on Linux) to review and send files.
 class FileSendSheet extends StatefulWidget {
@@ -56,6 +57,7 @@ class _FileSendSheetState extends State<FileSendSheet> {
         final socket = await Socket.connect(peer.ip, peer.port);
         pairingSocket = BeamSocket(socket);
         final result = await BeamPairing().initiatePairing(pairingSocket, SettingsStore.instance.deviceName);
+        if (!mounted) return;
         if (result != PairingResult.success) {
           pairingSocket.socket.destroy();
           return;
@@ -68,6 +70,7 @@ class _FileSendSheetState extends State<FileSendSheet> {
     }
 
     // Dismiss the sheet before starting long transfers
+    if (!mounted) return;
     widget.onDismiss();
 
     for (int i = 0; i < _files.length; i++) {

@@ -156,7 +156,8 @@ class PeerListWidget extends StatelessWidget {
                 final ip = ipController.text.trim();
                 final port = int.tryParse(portController.text.trim()) ?? 9001;
                 if (ip.isNotEmpty) {
-                  actions.addPeer(BeamPeer(
+                  actions.upsertPeer(BeamPeer(
+                    id: ip,
                     name: 'Manual Device',
                     ip: ip,
                     port: port,
