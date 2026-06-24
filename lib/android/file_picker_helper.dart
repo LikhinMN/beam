@@ -36,9 +36,12 @@ class FilePickerHelper {
       );
 
       if (result != null) {
-        return result.paths
-            .where((path) => path != null)
-            .map((path) => File(path!))
+        return result.files
+            .where((f) => f.path != null)
+            .map((f) {
+              f.readStream?.drain();
+              return File(f.path!);
+            })
             .toList();
       }
     } catch (e) {
