@@ -27,11 +27,9 @@ class FilePickerHelper {
   /// Handles permission denied gracefully by returning an empty list.
   static Future<List<File>> pickFiles() async {
     try {
-      final hasPermission = await _requestPermissions();
-      if (!hasPermission) {
-        print('Error: Storage permissions denied.');
-        return [];
-      }
+      // file_picker uses the Android Storage Access Framework (SAF) which doesn't
+      // require explicit READ_EXTERNAL_STORAGE permissions. The selected files are
+      // automatically cached in the app's local cache directory.
 
       final result = await FilePicker.platform.pickFiles(
         allowMultiple: true,
