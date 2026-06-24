@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:beam/core/protocol.dart';
+import 'package:beam/core/file_utils.dart';
 import 'foreground_service.dart';
 import 'storage_helper.dart';
 
@@ -67,8 +68,8 @@ class TransferHandler {
             if (await tempFile.exists()) {
               // Retrieve downloads directory and sanitize/resolve file name
               final downloadsDir = await StorageHelper.getDownloadDirectory();
-              final sanitizedName = StorageHelper.sanitizeFileName(fileName);
-              final finalName = StorageHelper.resolveConflict(downloadsDir, sanitizedName);
+              final sanitizedName = FileUtils.sanitizeFileName(fileName);
+              final finalName = FileUtils.resolveConflict(downloadsDir, sanitizedName);
               
               final finalPath = '${downloadsDir.path}${Platform.pathSeparator}$finalName';
               
