@@ -114,8 +114,10 @@ class BeamDiscovery {
     // Exclude self by matching unique device ID
     if (service.attributes['id'] == _selfDeviceId) return;
 
-    final ip = service.host ?? '';
-    if (ip.isEmpty) return;
+    final Map<String, dynamic> json = service.toJson();
+    final ip = json['host'] as String? ?? service.host ?? '';
+    final port = service.port;
+    if (ip.isEmpty || port == 0) return;
 
     // Disambiguate names if multiple peers share the same name
     String peerName = service.name;
@@ -133,6 +135,7 @@ class BeamDiscovery {
     );
 
     _peers[ip] = peer;
+    print('addPeer called for $peerName at $ip:$port');
     _peersController.add(_peers.values.toList());
   }
 

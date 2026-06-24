@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/widgets.dart';
 import 'package:beam/core/discovery.dart';
 import 'package:beam/core/transfer_server.dart';
 import 'package:beam/core/settings_store.dart';
@@ -78,7 +79,9 @@ Future<void> initAppServices() async {
 
   // 4 & 5. Start mDNS advertising and scanning
   discovery.peers.listen((peers) {
-    actions.setPeers(peers);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      actions.setPeers(peers);
+    });
   });
   
   await Future.wait([
