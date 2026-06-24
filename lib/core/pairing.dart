@@ -44,7 +44,7 @@ class BeamPairing {
   }
 
   /// Sender side pairing flow.
-  Future<PairingResult> initiatePairing(Socket socket, String deviceName) async {
+  Future<PairingResult> initiatePairing(BeamSocket beamSocket, String deviceName) async {
     try {
       // 1. Send OP_PAIR + deviceName
       final pairHeader = BinaryHeader(
@@ -53,11 +53,11 @@ class BeamPairing {
         fileSize: 0,
         fileName: deviceName,
       );
-      socket.add(pairHeader.encode());
-      await socket.flush();
+      beamSocket.socket.add(pairHeader.encode());
+      await beamSocket.socket.flush();
 
       // 2. Wait for PIN challenge (OP_PIN from receiver)
-      final challengeHeader = await _readHeader(socket).timeout(const Duration(seconds: 10));
+      final challengeHeader = await beamSocket.readHeader(timeout: const Duration(seconds: 10));
       if (challengeHeader.op != BinaryHeader.opPin) {
         throw Exception('Expected OP_PIN challenge');
       }
@@ -81,14 +81,14 @@ class BeamPairing {
         fileSize: 0,
         fileName: pin,
       );
-      socket.add(pinHeader.encode());
-      await socket.flush();
+      beamSocket.socket.add(pinHeader.encode());
+      await beamSocket.socket.flush();
 
       // 5. Wait for PAIR_OK or PAIR_REJECT
-      final resultHeader = await _readHeader(socket).timeout(const Duration(seconds: 10));
+      final resultHeader = await beamSocket.readHeader(timeout: const Duration(seconds: 10));
       if (resultHeader.op == BinaryHeader.opPairOk) {
         _eventsController.add(PairingEvent(PairingEventType.pairingSuccess));
-        await _trustDevice(socket.remoteAddress.address, resultHeader.fileName.isNotEmpty ? resultHeader.fileName : 'Receiver');
+        await _trustDevice(beamSocket.socket.remoteAddress.address, resultHeader.fileName.isNotEmpty ? resultHeader.fileName : 'Receiver');
         return PairingResult.success;
       } else {
         _eventsController.add(PairingEvent(PairingEventType.pairingFailed, message: 'Rejected by receiver'));
@@ -106,7 +106,7 @@ class BeamPairing {
   /// Receiver side pairing flow.
   /// Expects the caller to have already verified the initial OP_PAIR header
   /// and passes the [senderName] extracted from it.
-  Future<PairingResult> respondToPairing(Socket socket, String senderName) async {
+  Future<PairingResult> respondToPairing(BeamSocket beamSocket, String senderName) async {
     try {
       // 1. Generate PIN and show via stream
       final pin = generatePIN();
@@ -119,11 +119,11 @@ class BeamPairing {
         fileSize: 0,
         fileName: 'CHALLENGE',
       );
-      socket.add(challengeHeader.encode());
-      await socket.flush();
+      beamSocket.socket.add(challengeHeader.encode());
+      await beamSocket.socket.flush();
 
       // 3. Wait for PIN from sender
-      final pinHeader = await _readHeader(socket).timeout(const Duration(seconds: 60));
+      final pinHeader = await beamSocket.readHeader(timeout: const Duration(seconds: 60));
       if (pinHeader.op != BinaryHeader.opPin) {
         throw Exception('Expected OP_PIN');
       }
@@ -138,10 +138,10 @@ class BeamPairing {
           fileSize: 0,
           fileName: 'ReceiverDevice', 
         );
-        socket.add(okHeader.encode());
-        await socket.flush();
+        beamSocket.socket.add(okHeader.encode());
+        await beamSocket.socket.flush();
 
-        await _trustDevice(socket.remoteAddress.address, senderName);
+        await _trustDevice(beamSocket.socket.remoteAddress.address, senderName);
         _eventsController.add(PairingEvent(PairingEventType.pairingSuccess));
         return PairingResult.success;
       } else {
@@ -151,8 +151,8 @@ class BeamPairing {
           fileSize: 0,
           fileName: '',
         );
-        socket.add(rejectHeader.encode());
-        await socket.flush();
+        beamSocket.socket.add(rejectHeader.encode());
+        await beamSocket.socket.flush();
 
         _eventsController.add(PairingEvent(PairingEventType.pairingFailed, message: 'Invalid PIN'));
         return PairingResult.rejected;
@@ -166,34 +166,6 @@ class BeamPairing {
     }
   }
 
-  /// Helper to read a single BinaryHeader from a raw socket stream.
-  Future<BinaryHeader> _readHeader(Socket socket) async {
-    final completer = Completer<BinaryHeader>();
-    final buffer = BytesBuilder();
-    StreamSubscription? sub;
-
-    sub = socket.listen((data) {
-      buffer.add(data);
-      if (buffer.length >= 269) {
-        try {
-          final headerData = buffer.takeBytes().sublist(0, 269);
-          final header = BinaryHeader.decode(Uint8List.fromList(headerData));
-          sub?.cancel();
-          if (!completer.isCompleted) completer.complete(header);
-        } catch (e) {
-          sub?.cancel();
-          if (!completer.isCompleted) completer.completeError(e);
-        }
-      }
-    }, onError: (e) {
-      sub?.cancel();
-      if (!completer.isCompleted) completer.completeError(e);
-    }, onDone: () {
-      if (!completer.isCompleted) completer.completeError(Exception('Socket closed'));
-    });
-
-    return completer.future;
-  }
 
   /// Checks the trusted store for a matching entry.
   Future<bool> isTrusted(String ip, {String? deviceName}) async {

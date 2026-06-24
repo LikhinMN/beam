@@ -46,8 +46,8 @@ class TransferClient {
   Stream<TransferEvent> get events => _eventController.stream;
 
   /// Sends a file to the specified host and port.
-  Future<void> sendFile(String host, int port, File file) async {
-    Socket? socket;
+  Future<void> sendFile(String host, int port, File file, {BeamSocket? existingSocket}) async {
+    BeamSocket? beamSocket = existingSocket;
     try {
       final fileSize = await file.length();
       final fileName = file.path.split(Platform.pathSeparator).last;
@@ -61,28 +61,31 @@ class TransferClient {
       final checksum = await computeChecksum(file);
       final checksumBytes = utf8.encode(checksum);
 
-      // 2. Connect to the server with retries
-      for (int attempt = 1; attempt <= 3; attempt++) {
-        try {
-          if (attempt > 1) {
-            _eventController.add(TransferEvent(
-              status: TransferEventType.retrying,
-              attempt: attempt,
-              maxAttempts: 3,
-              totalBytes: fileSize,
-            ));
-            await Future.delayed(const Duration(seconds: 2));
-          }
-          socket = await Socket.connect(host, port);
-          break; // Connected
-        } catch (e) {
-          if (attempt == 3) {
-            throw Exception('Connection failed after 3 attempts');
+      // 2. Connect to the server with retries if no existing socket
+      if (beamSocket == null) {
+        for (int attempt = 1; attempt <= 3; attempt++) {
+          try {
+            if (attempt > 1) {
+              _eventController.add(TransferEvent(
+                status: TransferEventType.retrying,
+                attempt: attempt,
+                maxAttempts: 3,
+                totalBytes: fileSize,
+              ));
+              await Future.delayed(const Duration(seconds: 2));
+            }
+            final socket = await Socket.connect(host, port);
+            beamSocket = BeamSocket(socket);
+            break; // Connected
+          } catch (e) {
+            if (attempt == 3) {
+              throw Exception('Connection failed after 3 attempts');
+            }
           }
         }
       }
 
-      if (socket == null) throw Exception('Socket is null');
+      if (beamSocket == null) throw Exception('Socket is null');
 
       // 3. Send header
       final header = BinaryHeader(
@@ -91,7 +94,7 @@ class TransferClient {
         fileSize: fileSize,
         fileName: fileName,
       );
-      socket.add(header.encode());
+      beamSocket.socket.add(header.encode());
 
       // 4. Stream file using ChunkSizeTuner
       final tuner = ChunkSizeTuner();
@@ -105,8 +108,8 @@ class TransferClient {
           
           tuner.onChunkStarted();
           final chunk = await raf.read(bytesToRead);
-          socket.add(chunk);
-          await socket.flush(); // Ensure chunks are sent continuously
+          beamSocket.socket.add(chunk);
+          await beamSocket.socket.flush(); // Ensure chunks are sent continuously
           tuner.onChunkCompleted();
           
           bytesSent += chunk.length;
@@ -121,35 +124,22 @@ class TransferClient {
       }
 
       // 5. Send checksum as final 64-byte block
-      socket.add(checksumBytes);
-      await socket.flush();
+      beamSocket.socket.add(checksumBytes);
+      await beamSocket.socket.flush();
 
       // 6. Wait for ACK or REJECT
-      final responseBuffer = BytesBuilder();
-      await for (final data in socket) {
-        responseBuffer.add(data);
-        if (responseBuffer.length >= 269) {
-          break;
-        }
-      }
-
-      if (responseBuffer.length >= 269) {
-        final responseData = responseBuffer.takeBytes().sublist(0, 269);
-        final responseHeader = BinaryHeader.decode(Uint8List.fromList(responseData));
+      final responseHeader = await beamSocket.readHeader(timeout: const Duration(seconds: 30));
         
-        if (responseHeader.op == BinaryHeader.opAck) {
-          _eventController.add(TransferEvent(
-            status: TransferEventType.completed,
-            bytesTransferred: fileSize,
-            totalBytes: fileSize,
-          ));
-        } else if (responseHeader.op == BinaryHeader.opReject) {
-          throw Exception('Server rejected the file (checksum mismatch)');
-        } else {
-          throw Exception('Unknown server response op: ${responseHeader.op}');
-        }
+      if (responseHeader.op == BinaryHeader.opAck) {
+        _eventController.add(TransferEvent(
+          status: TransferEventType.completed,
+          bytesTransferred: fileSize,
+          totalBytes: fileSize,
+        ));
+      } else if (responseHeader.op == BinaryHeader.opReject) {
+        throw Exception('Server rejected the file (checksum mismatch)');
       } else {
-         throw Exception('Connection closed before response received');
+        throw Exception('Unknown server response op: ${responseHeader.op}');
       }
 
     } catch (e) {
@@ -158,7 +148,9 @@ class TransferClient {
         error: e.toString(),
       ));
     } finally {
-      socket?.destroy();
+      if (existingSocket == null) {
+        beamSocket?.socket.destroy();
+      }
     }
   }
 }

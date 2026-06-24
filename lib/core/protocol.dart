@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:async';
 
 /// Represents the type of a transfer event.
 enum TransferEventType {
@@ -110,5 +112,51 @@ class BinaryHeader {
       fileSize: fileSize,
       fileName: fileName,
     );
+  }
+}
+
+/// A wrapper around Socket that uses StreamIterator to read headers and consume the stream safely
+/// without triggering "Stream has already been listened to" exceptions.
+class BeamSocket {
+  final Socket socket;
+  final StreamIterator<Uint8List> iterator;
+  final BytesBuilder _buffer = BytesBuilder();
+
+  BeamSocket(this.socket) : iterator = StreamIterator<Uint8List>(socket);
+
+  Future<BinaryHeader> readHeader({Duration? timeout}) async {
+    while (_buffer.length < 269) {
+      bool hasNext;
+      if (timeout != null) {
+        hasNext = await iterator.moveNext().timeout(timeout);
+      } else {
+        hasNext = await iterator.moveNext();
+      }
+      if (!hasNext) {
+        throw Exception('Socket closed before full header received');
+      }
+      _buffer.add(iterator.current);
+    }
+    
+    final allData = _buffer.takeBytes();
+    final headerData = allData.sublist(0, 269);
+    final header = BinaryHeader.decode(Uint8List.fromList(headerData));
+    
+    final remaining = allData.sublist(269);
+    if (remaining.isNotEmpty) {
+      _buffer.add(remaining);
+    }
+    
+    return header;
+  }
+
+  /// Consumes the rest of the stream, yielding buffered bytes first.
+  Stream<Uint8List> consumeStream() async* {
+    if (_buffer.isNotEmpty) {
+      yield _buffer.takeBytes();
+    }
+    while (await iterator.moveNext()) {
+      yield iterator.current;
+    }
   }
 }

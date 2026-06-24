@@ -40,95 +40,80 @@ class TransferServer {
   /// Spawns a new Isolate to handle the incoming connection.
   void _handleConnection(Socket client) async {
     final ip = client.remoteAddress.address;
-    final buffer = BytesBuilder();
-    late StreamSubscription<Uint8List> sub;
-    bool headerProcessed = false;
-    SendPort? isolateSendPort;
-    
+    final beamSocket = BeamSocket(client);
     final directory = await getApplicationDocumentsDirectory();
     final saveDir = directory.path;
 
-    sub = client.listen(
-      (Uint8List data) async {
-        if (headerProcessed) {
-          isolateSendPort?.send(data);
+    try {
+      BinaryHeader header = await beamSocket.readHeader();
+
+      if (header.magic != BinaryHeader.magicNumber) {
+        client.destroy();
+        return;
+      }
+
+      if (header.op == BinaryHeader.opPair) {
+        final result = await BeamPairing().respondToPairing(beamSocket, header.fileName);
+        if (result != PairingResult.success) {
+          client.destroy();
           return;
         }
+        // Pairing succeeded, now expect OP_SEND
+        header = await beamSocket.readHeader();
+      }
 
-        buffer.add(data);
-        if (buffer.length >= 269 && !headerProcessed) {
-          headerProcessed = true;
-          sub.pause();
-
-          final allData = buffer.takeBytes();
-          final headerData = allData.sublist(0, 269);
-          BinaryHeader header;
-          try {
-            header = BinaryHeader.decode(Uint8List.fromList(headerData));
-          } catch (e) {
+      if (header.op == BinaryHeader.opSend) {
+        final isTrusted = await BeamPairing().isTrusted(ip);
+        if (!isTrusted) {
+          // If they didn't send OP_PAIR but we require trust, try pairing flow
+          final result = await BeamPairing().respondToPairing(beamSocket, header.fileName);
+          if (result != PairingResult.success) {
+            _eventController.add(TransferEvent(
+              status: TransferEventType.failed,
+              error: 'Device not trusted and pairing failed.',
+              fileName: header.fileName,
+              senderIp: ip,
+            ));
             client.destroy();
             return;
-          }
-
-          if (header.magic != BinaryHeader.magicNumber) {
-            client.destroy();
-            return;
-          }
-
-          if (header.op == BinaryHeader.opPair) {
-            await BeamPairing().respondToPairing(client, header.fileName);
-            client.destroy();
-            return;
-          }
-
-          if (header.op == BinaryHeader.opSend) {
-            final isTrusted = await BeamPairing().isTrusted(ip);
-            if (!isTrusted) {
-              _eventController.add(TransferEvent(
-                status: TransferEventType.failed,
-                error: 'Device not trusted. Please pair first.',
-                fileName: header.fileName,
-                senderIp: ip,
-              ));
-              client.destroy();
-              return;
-            }
-
-            final receivePort = ReceivePort();
-            await Isolate.spawn(
-              _isolateWorker, 
-              _IsolateArgs(receivePort.sendPort, saveDir, ip),
-            );
-
-            final streamIterator = StreamIterator(receivePort);
-            await streamIterator.moveNext();
-            isolateSendPort = streamIterator.current as SendPort;
-
-            receivePort.listen((message) {
-              if (message is TransferEvent) {
-                _eventController.add(message);
-              } else if (message is Map && message['action'] == 'send') {
-                client.add(message['data']);
-              } else if (message is Map && message['action'] == 'close') {
-                client.destroy();
-                receivePort.close();
-              }
-            });
-
-            isolateSendPort?.send(allData);
-            sub.resume();
-          } else {
-            client.destroy();
           }
         }
-      },
-      onDone: () {
-        if (headerProcessed) isolateSendPort?.send(null); // Signal EOF
-      },
-      onError: (error) {
-        if (headerProcessed) isolateSendPort?.send(error.toString()); // Signal error
-      },
-    );
+
+        final receivePort = ReceivePort();
+        await Isolate.spawn(
+          _isolateWorker, 
+          _IsolateArgs(receivePort.sendPort, saveDir, ip),
+        );
+
+        final streamIterator = StreamIterator(receivePort);
+        await streamIterator.moveNext();
+        final isolateSendPort = streamIterator.current as SendPort;
+
+        receivePort.listen((message) {
+          if (message is TransferEvent) {
+            _eventController.add(message);
+          } else if (message is Map && message['action'] == 'send') {
+            client.add(message['data'] as Uint8List);
+          } else if (message is Map && message['action'] == 'close') {
+            client.destroy();
+            receivePort.close();
+          }
+        });
+
+        // Send the parsed OP_SEND header to the isolate
+        isolateSendPort.send(header.encode());
+
+        // Stream remaining data
+        await for (final data in beamSocket.consumeStream()) {
+          isolateSendPort.send(data);
+        }
+        isolateSendPort.send(null); // EOF
+      } else {
+        client.destroy();
+      }
+    } catch (e) {
+      client.destroy();
+    }
   }
 }
 

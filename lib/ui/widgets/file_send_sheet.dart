@@ -10,6 +10,8 @@ import 'package:beam/core/utils.dart';
 import 'package:beam/core/transfer_client.dart';
 import 'package:beam/core/speed_calculator.dart';
 import 'package:beam/ui/state/actions.dart' as actions;
+import 'package:beam/core/pairing.dart';
+import 'package:beam/core/settings_store.dart';
 
 /// A panel (bottom sheet on Android, side panel on Linux) to review and send files.
 class FileSendSheet extends StatefulWidget {
@@ -44,8 +46,32 @@ class _FileSendSheetState extends State<FileSendSheet> {
     }
   }
 
-  void _sendFiles(BeamPeer peer) {
-    for (var file in _files) {
+  void _sendFiles(BeamPeer peer) async {
+    final isTrusted = await BeamPairing().isTrusted(peer.ip);
+    BeamSocket? pairingSocket;
+    
+    if (!isTrusted) {
+      actions.setPairingState(const AsyncLoading());
+      try {
+        final socket = await Socket.connect(peer.ip, peer.port);
+        pairingSocket = BeamSocket(socket);
+        final result = await BeamPairing().initiatePairing(pairingSocket, SettingsStore.instance.deviceName);
+        if (result != PairingResult.success) {
+          pairingSocket.socket.destroy();
+          return;
+        }
+      } catch (e) {
+        actions.setPairingState(AsyncError(Exception(e.toString()), StackTrace.current));
+        pairingSocket?.socket.destroy();
+        return;
+      }
+    }
+
+    // Dismiss the sheet before starting long transfers
+    widget.onDismiss();
+
+    for (int i = 0; i < _files.length; i++) {
+      final file = _files[i];
       final id = '${DateTime.now().millisecondsSinceEpoch}_${file.hashCode}';
       final size = file.lengthSync();
       final baseName = p.basename(file.path);
@@ -66,12 +92,6 @@ class _FileSendSheetState extends State<FileSendSheet> {
       final client = TransferClient();
       
       client.events.listen((event) {
-        // Since we don't know the exact structure of TransferEvent from sprint 1 here,
-        // we assume it provides status, bytesTransferred, error.
-        // We map it to our TransferItem
-        
-        // This is a rough estimation of how the mapping looks.
-        // We need to parse event status string or enum to TransferStatus
         TransferStatus status = TransferStatus.active;
         if (event.status.name == 'completed') status = TransferStatus.completed;
         if (event.status.name == 'failed') status = TransferStatus.failed;
@@ -92,10 +112,9 @@ class _FileSendSheetState extends State<FileSendSheet> {
         ));
       });
       
-      client.sendFile(peer.ip, peer.port, file);
+      // Pass the pairing socket only for the first file to reuse the connection
+      client.sendFile(peer.ip, peer.port, file, existingSocket: i == 0 ? pairingSocket : null);
     }
-    
-    widget.onDismiss();
   }
 
   @override

@@ -8,7 +8,9 @@ import 'package:beam/ui/state/actions.dart' as actions;
 import 'package:beam/ui/state/app_state.dart';
 import 'package:beam/core/speed_calculator.dart';
 import 'package:beam/core/protocol.dart';
+import 'package:beam/core/pairing.dart';
 import 'package:beam/linux/firewall_helper.dart';
+import 'package:pico/pico.dart';
 
 final BeamDiscovery discovery = BeamDiscovery();
 final TransferServer server = TransferServer();
@@ -77,7 +79,25 @@ Future<void> initAppServices() async {
     print('Failed to start server: $e');
   }
 
-  // 4 & 5. Start mDNS advertising and scanning
+  // 4. Wire up pairing events
+  BeamPairing().pairingEvents.listen((event) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (event.type == PairingEventType.pairingSuccess) {
+        actions.setPairingState(const AsyncData(null));
+        actions.setIncomingPIN(null);
+      } else if (event.type == PairingEventType.waitingForPin) {
+        actions.setPairingState(const AsyncLoading());
+      } else if (event.type == PairingEventType.pinGenerated) {
+        actions.setIncomingPIN(event.pin);
+        actions.setPairingState(const AsyncLoading());
+      } else if (event.type == PairingEventType.pairingFailed || event.type == PairingEventType.pairingTimeout) {
+        actions.setPairingState(AsyncError(Exception(event.message ?? 'Pairing failed'), StackTrace.current));
+        actions.setIncomingPIN(null);
+      }
+    });
+  });
+
+  // 5 & 6. Start mDNS advertising and scanning
   discovery.peers.listen((peers) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       actions.setPeers(peers);
