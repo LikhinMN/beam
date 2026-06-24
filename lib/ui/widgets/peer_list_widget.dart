@@ -43,10 +43,11 @@ class PeerListWidget extends StatelessWidget {
                     IconButton(
                       icon: const Icon(Icons.refresh, color: BeamColors.textPrimary),
                       onPressed: () async {
-                        actions.setScanning(true);
+                        actions.setScanning(false);
                         await discovery.stopScanning();
+                        actions.setPeers([]);
                         await discovery.startScanning();
-                        // Scanning continues in background, we keep isScanning true for a while or permanently
+                        actions.setScanning(true);
                       },
                     ),
                   ],

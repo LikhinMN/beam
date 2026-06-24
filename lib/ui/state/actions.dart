@@ -29,8 +29,16 @@ void setPeers(List<BeamPeer> peers) {
   store.set((state) => state.copyWith(peers: peers));
 }
 
+Timer? _scanTimer;
+
 void setScanning(bool value) {
   store.set((state) => state.copyWith(isScanning: value));
+  _scanTimer?.cancel();
+  if (value) {
+    _scanTimer = Timer(const Duration(seconds: 5), () {
+      store.set((state) => state.copyWith(isScanning: false));
+    });
+  }
 }
 
 void selectPeer(BeamPeer? peer) {
