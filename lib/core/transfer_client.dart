@@ -77,9 +77,7 @@ class TransferClient {
       rawSocket.destroy();
       rawSocket = null;
 
-      for (final file in files) {
-        await sendFile(host, port, file);
-      }
+      await Future.wait(files.map((file) => sendFile(host, port, file)));
     } finally {
       rawSocket?.destroy();
     }
