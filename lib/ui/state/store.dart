@@ -11,4 +11,5 @@ final store = Store<AppState>((
   firewallError: null,
   history: const AsyncData([]),
   incomingRequest: null,
+  sharedText: null,
 ));

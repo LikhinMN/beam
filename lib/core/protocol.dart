@@ -42,6 +42,7 @@ class BinaryHeader {
   static const int opPairReject = 0x06;
   static const int opPin = 0x07;
   static const int opConnect = 0x08;
+  static const int opText = 0x09;
 
   final int magic;
   final int op;

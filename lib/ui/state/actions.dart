@@ -137,3 +137,12 @@ void setIncomingRequest(IncomingRequest? request) {
     ),
   );
 }
+
+void setSharedText(String? text) {
+  store.set(
+    (state) => state.copyWith(
+      sharedText: text,
+      clearSharedText: text == null,
+    ),
+  );
+}

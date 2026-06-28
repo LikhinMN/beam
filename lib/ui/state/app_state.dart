@@ -62,6 +62,7 @@ typedef AppState = ({
   String? firewallError,
   AsyncValue<List<HistoryEntry>> history,
   IncomingRequest? incomingRequest,
+  String? sharedText,
 });
 
 extension AppStateX on AppState {
@@ -74,9 +75,11 @@ extension AppStateX on AppState {
     String? firewallError,
     AsyncValue<List<HistoryEntry>>? history,
     IncomingRequest? incomingRequest,
+    String? sharedText,
     bool clearSelectedPeer = false,
     bool clearFirewallError = false,
     bool clearIncomingRequest = false,
+    bool clearSharedText = false,
   }) {
     return (
       peers: peers ?? this.peers,
@@ -93,6 +96,7 @@ extension AppStateX on AppState {
       incomingRequest: clearIncomingRequest
           ? null
           : (incomingRequest ?? this.incomingRequest),
+      sharedText: clearSharedText ? null : (sharedText ?? this.sharedText),
     );
   }
 }

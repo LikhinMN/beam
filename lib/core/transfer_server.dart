@@ -135,6 +135,20 @@ class TransferServer {
           await _handleFileReceive(beamSocket, header, ip, port);
           break;
 
+        case BinaryHeader.opText:
+          if (await BeamPairing.instance.isTrusted(ip)) {
+            final bytes = <int>[];
+            await for (final data in beamSocket.consumeStream()) {
+              bytes.addAll(data);
+              if (bytes.length >= header.fileSize) break;
+            }
+            final text = utf8.decode(bytes.sublist(0, header.fileSize));
+            actions.setSharedText(text);
+          }
+          client.destroy();
+          _activeSockets.remove(client);
+          break;
+
         default:
           // Unknown op — log and close cleanly
           debugPrint('[Server] Unknown op: ${header.op} — closing socket');

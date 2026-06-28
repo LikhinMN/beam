@@ -85,6 +85,26 @@ class TransferClient {
     }
   }
 
+  /// Sends a text message to the specified host and port.
+  Future<void> sendText(String host, int port, String text) async {
+    Socket? socket;
+    try {
+      socket = await Socket.connect(host, port);
+      final textBytes = utf8.encode(text);
+      final header = BinaryHeader(
+        magic: BinaryHeader.magicNumber,
+        op: BinaryHeader.opText,
+        fileSize: textBytes.length,
+        fileName: '',
+      );
+      socket.add(header.encode());
+      socket.add(textBytes);
+      await socket.flush();
+    } finally {
+      socket?.destroy();
+    }
+  }
+
   /// Sends a file to the specified host and port.
   Future<void> sendFile(
     String host,
