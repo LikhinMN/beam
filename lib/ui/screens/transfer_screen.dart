@@ -190,9 +190,6 @@ class _TransferScreenState extends State<TransferScreen> {
           }
         }
         return Card(
-          color: BeamColors.surface,
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
@@ -220,11 +217,11 @@ class _TransferScreenState extends State<TransferScreen> {
                     hintText: "Type or paste text to share...",
                     hintStyle: BeamTextStyles.body.copyWith(color: BeamColors.textSecondary),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: BeamColors.accent),
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide.none,
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(16),
                       borderSide: const BorderSide(color: BeamColors.accent, width: 2),
                     ),
                     filled: true,
@@ -241,9 +238,6 @@ class _TransferScreenState extends State<TransferScreen> {
 
   Widget _buildSendCard() {
     return Card(
-      color: BeamColors.surface,
-      elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
@@ -293,14 +287,9 @@ class _TransferScreenState extends State<TransferScreen> {
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: _selectedFiles.isEmpty || _isSending ? null : _sendFiles,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: BeamColors.accent,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
               child: _isSending
                   ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Text("Send", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                  : const Text("Send Files"),
             ),
           ],
         ),
@@ -314,9 +303,6 @@ class _TransferScreenState extends State<TransferScreen> {
       selector: (state) => state.transfers.toList(),
       builder: (context, transfers) {
         return Card(
-          color: BeamColors.surface,
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(

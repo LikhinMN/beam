@@ -27,15 +27,22 @@ class PeerListTile extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 40,
-              height: 40,
+              width: 48,
+              height: 48,
               decoration: BoxDecoration(
-                color: BeamColors.accent.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
+                gradient: BeamColors.primaryGradient,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: BeamColors.accent.withOpacity(0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  )
+                ],
               ),
               child: Icon(
                 peer.platform == 'android' ? Icons.phone_android : Icons.laptop,
-                color: BeamColors.accent,
+                color: Colors.white,
                 size: 24,
               ),
             ),

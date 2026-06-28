@@ -3,20 +3,35 @@ import 'package:google_fonts/google_fonts.dart';
 
 /// Centralized color palette for the Beam app.
 class BeamColors {
-  static const Color background = Color(0xFF0D0D0D);
-  static const Color surface = Color(0xFF1A1A1A);
-  static const Color accent = Color(0xFF00C2FF); // Electric Blue
-  static const Color success = Color(0xFF00E096);
-  static const Color error = Color(0xFFFF4C4C);
-  static const Color textPrimary = Color(0xFFFFFFFF);
-  static const Color textSecondary = Color(0xFF8A8A8A);
+  static const Color background = Color(0xFF09090B);
+  static const Color surface = Color(0xFF18181B);
+  static const Color surfaceHighlight = Color(0xFF27272A);
+  static const Color accent = Color(0xFF38BDF8); // Vibrant cyan-blue
+  static const Color accentSecondary = Color(0xFF818CF8); // Indigo
+  static const Color success = Color(0xFF34D399);
+  static const Color error = Color(0xFFF87171);
+  static const Color textPrimary = Color(0xFFF8FAFC);
+  static const Color textSecondary = Color(0xFF94A3B8);
+
+  static const LinearGradient primaryGradient = LinearGradient(
+    colors: [accent, accentSecondary],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
 }
 
 /// Centralized typography styles for the Beam app.
 class BeamTextStyles {
-  static final TextStyle headline = GoogleFonts.inter(
-    fontSize: 24,
-    fontWeight: FontWeight.w700,
+  static final TextStyle headline = GoogleFonts.outfit(
+    fontSize: 28,
+    fontWeight: FontWeight.w800,
+    color: BeamColors.textPrimary,
+    letterSpacing: -0.5,
+  );
+
+  static final TextStyle title = GoogleFonts.outfit(
+    fontSize: 20,
+    fontWeight: FontWeight.w600,
     color: BeamColors.textPrimary,
   );
 
@@ -53,32 +68,49 @@ final ThemeData beamTheme = ThemeData(
   ),
   cardTheme: CardThemeData(
     color: BeamColors.surface,
-    elevation: 0,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    elevation: 8,
+    shadowColor: Colors.black.withOpacity(0.4),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(24),
+      side: const BorderSide(color: BeamColors.surfaceHighlight, width: 1),
+    ),
   ),
   elevatedButtonTheme: ElevatedButtonThemeData(
     style: ElevatedButton.styleFrom(
       backgroundColor: BeamColors.accent,
-      foregroundColor: BeamColors.textPrimary,
+      foregroundColor: BeamColors.background,
       elevation: 0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-      textStyle: BeamTextStyles.body.copyWith(fontWeight: FontWeight.w600),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      textStyle: BeamTextStyles.body.copyWith(fontWeight: FontWeight.bold),
     ),
   ),
   textButtonTheme: TextButtonThemeData(
     style: TextButton.styleFrom(
       foregroundColor: BeamColors.accent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
   ),
   dialogTheme: DialogThemeData(
     backgroundColor: BeamColors.surface,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
   ),
   floatingActionButtonTheme: const FloatingActionButtonThemeData(
     backgroundColor: BeamColors.accent,
-    foregroundColor: BeamColors.textPrimary,
-    elevation: 0,
+    foregroundColor: BeamColors.background,
+    elevation: 4,
+  ),
+  inputDecorationTheme: InputDecorationTheme(
+    filled: true,
+    fillColor: BeamColors.surfaceHighlight.withOpacity(0.5),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: BorderSide.none,
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: const BorderSide(color: BeamColors.accent, width: 2),
+    ),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
   ),
 );
