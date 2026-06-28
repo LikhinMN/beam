@@ -93,12 +93,12 @@ class TransferClient {
     BeamSocket? existingSocket,
   }) async {
     BeamSocket? beamSocket = existingSocket;
+    final fileName = file.path.split(Platform.pathSeparator).last;
     try {
       final fileSize = await file.length();
-      final fileName = file.path.split(Platform.pathSeparator).last;
 
       _eventController.add(
-        TransferEvent(status: TransferEventType.started, totalBytes: fileSize),
+        TransferEvent(status: TransferEventType.started, totalBytes: fileSize, fileName: fileName, filePath: file.path),
       );
 
       // 1. Compute checksum first
@@ -116,6 +116,8 @@ class TransferClient {
                   attempt: attempt,
                   maxAttempts: 3,
                   totalBytes: fileSize,
+                  fileName: fileName,
+                  filePath: file.path,
                 ),
               );
               await Future.delayed(const Duration(seconds: 2));
@@ -171,6 +173,8 @@ class TransferClient {
                 status: TransferEventType.progress,
                 bytesTransferred: bytesSent,
                 totalBytes: fileSize,
+                fileName: fileName,
+                filePath: file.path,
               ),
             );
           }
@@ -194,6 +198,8 @@ class TransferClient {
             status: TransferEventType.completed,
             bytesTransferred: fileSize,
             totalBytes: fileSize,
+            fileName: fileName,
+            filePath: file.path,
           ),
         );
       } else if (responseHeader.op == BinaryHeader.opReject) {
@@ -203,7 +209,7 @@ class TransferClient {
       }
     } catch (e) {
       _eventController.add(
-        TransferEvent(status: TransferEventType.failed, error: e.toString()),
+        TransferEvent(status: TransferEventType.failed, error: e.toString(), fileName: fileName, filePath: file.path),
       );
     } finally {
       if (existingSocket == null) {

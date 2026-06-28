@@ -11,6 +11,8 @@ import 'package:beam/android/file_picker_helper.dart';
 import 'dart:io';
 import 'package:open_file/open_file.dart';
 import 'package:path/path.dart' as p;
+import 'package:beam/core/speed_calculator.dart';
+import 'package:beam/core/protocol.dart';
 
 class TransferScreen extends StatefulWidget {
   final BeamPeer peer;
@@ -25,6 +27,7 @@ class _TransferScreenState extends State<TransferScreen> {
   final List<File> _selectedFiles = [];
   bool _isSending = false;
   TransferClient? _client;
+  final Map<String, SpeedCalculator> _speedCalcs = {};
 
   @override
   void initState() {
@@ -34,6 +37,42 @@ class _TransferScreenState extends State<TransferScreen> {
 
   Future<void> _connect() async {
     _client = TransferClient();
+    _client!.events.listen((event) {
+      final id = event.filePath ?? event.fileName ?? 'unknown_send';
+      SpeedCalculator? calc = _speedCalcs[id];
+      if (calc == null) {
+        calc = SpeedCalculator();
+        _speedCalcs[id] = calc;
+      }
+
+      TransferStatus status = TransferStatus.active;
+      if (event.status.name == 'completed') status = TransferStatus.completed;
+      if (event.status.name == 'failed') status = TransferStatus.failed;
+
+      final transferred = event.bytesTransferred;
+      calc.update(transferred);
+      final totalBytes = event.totalBytes;
+
+      actions.upsertTransfer(
+        (
+          id: id,
+          fileName: event.fileName ?? 'Unknown',
+          totalBytes: totalBytes,
+          transferredBytes: transferred,
+          speedBytesPerSec: calc.currentSpeed,
+          eta: calc.eta(totalBytes > transferred ? totalBytes - transferred : 0),
+          direction: TransferDirection.send,
+          status: status,
+          errorReason: event.error,
+        ),
+        peerName: widget.peer.name,
+        peerIp: widget.peer.ip,
+      );
+
+      if (status != TransferStatus.active) {
+        _speedCalcs.remove(id);
+      }
+    });
     actions.setPeerState(widget.peer.id, PeerState.connected);
   }
 
@@ -187,10 +226,10 @@ class _TransferScreenState extends State<TransferScreen> {
     );
   }
 
-  Widget _buildReceiveCard() {
+  Widget _buildTransfersCard() {
     return PicoBuilder<AppState, List<TransferItem>>(
       store: store,
-      selector: (state) => state.transfers.where((t) => t.direction == TransferDirection.receive).toList(),
+      selector: (state) => state.transfers.toList(),
       builder: (context, transfers) {
         return Card(
           color: BeamColors.surface,
@@ -201,7 +240,7 @@ class _TransferScreenState extends State<TransferScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text("Received Files", style: BeamTextStyles.headline),
+                Text("Transfers", style: BeamTextStyles.headline),
                 const SizedBox(height: 16),
                 if (transfers.isEmpty)
                   Padding(
@@ -252,9 +291,20 @@ class _TransferScreenState extends State<TransferScreen> {
 
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.check_circle, color: Colors.green),
+                        leading: Icon(
+                          t.status == TransferStatus.completed
+                              ? Icons.check_circle
+                              : Icons.error,
+                          color: t.status == TransferStatus.completed
+                              ? Colors.green
+                              : Colors.red,
+                        ),
                         title: Text(t.fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        subtitle: Text("${(t.totalBytes / 1024 / 1024).toStringAsFixed(2)} MB"),
+                        subtitle: Text(
+                          t.status == TransferStatus.completed
+                              ? "${(t.totalBytes / 1024 / 1024).toStringAsFixed(2)} MB${t.direction == TransferDirection.send ? ' (Sent)' : ' (Received)'}"
+                              : (t.errorReason ?? 'Failed'),
+                        ),
                         trailing: TextButton(
                           onPressed: () {
                             if (t.errorReason != null && t.errorReason!.isNotEmpty) {
@@ -331,7 +381,7 @@ class _TransferScreenState extends State<TransferScreen> {
             children: [
               _buildSendCard(),
               const SizedBox(height: 16),
-              _buildReceiveCard(),
+              _buildTransfersCard(),
             ],
           ),
         ),
