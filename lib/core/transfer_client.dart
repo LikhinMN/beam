@@ -72,9 +72,13 @@ class TransferClient {
       if (response.op != BinaryHeader.opAck) {
         throw Exception("Session rejected by server");
       }
+      
+      // Close the connect socket, each file transfer will establish its own connection
+      rawSocket.destroy();
+      rawSocket = null;
 
       for (final file in files) {
-        await sendFile(host, port, file, existingSocket: beamSocket);
+        await sendFile(host, port, file);
       }
     } finally {
       rawSocket?.destroy();
