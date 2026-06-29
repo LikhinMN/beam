@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:beam/ui/theme.dart';
 import 'package:beam/core/discovery.dart';
 import 'package:beam/ui/state/app_state.dart';
@@ -202,8 +203,12 @@ class _TransferScreenState extends State<TransferScreen> {
                     if (_textController.text.isNotEmpty)
                       IconButton(
                         icon: const Icon(Icons.copy, color: BeamColors.accent),
-                        onPressed: () {
-                           // Clipboard.setData not imported, just clear for now or ignore
+                        onPressed: () async {
+                          await Clipboard.setData(ClipboardData(text: _textController.text));
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Copied to clipboard')),
+                          );
                         },
                       )
                   ],
@@ -211,8 +216,8 @@ class _TransferScreenState extends State<TransferScreen> {
                 const SizedBox(height: 16),
                 TextField(
                   controller: _textController,
-                  maxLines: 4,
-                  minLines: 1,
+                  maxLines: 15,
+                  minLines: 6,
                   decoration: InputDecoration(
                     hintText: "Type or paste text to share...",
                     hintStyle: BeamTextStyles.body.copyWith(color: BeamColors.textSecondary),

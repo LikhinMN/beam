@@ -53,9 +53,7 @@ class BeamPairing {
   Stream<TrustedDevice> get onDevicePaired => _devicePairedController.stream;
 
   void init() {
-    sessionSecret = List.generate(32, (_) =>
-      Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0')
-    ).join();
+    sessionSecret = (Random.secure().nextInt(900000) + 100000).toString();
   }
 
   // Called by scanner after reading QR

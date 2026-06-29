@@ -128,6 +128,48 @@ class _DeviceScreenStateWidget extends State<DeviceScreen> with SingleTickerProv
     }
   }
 
+  Future<void> _handleManualPin(String pin) async {
+    if (pin.length != 6) return;
+    if (_state != _DeviceScreenState.scanning) return;
+
+    setState(() {
+      _state = _DeviceScreenState.pairing;
+      _errorMessage = null;
+    });
+
+    try {
+      final result = await BeamPairing.instance.initiateQRPairing(
+        widget.peer.ip,
+        widget.peer.port,
+        pin,
+        widget.peer.id,
+        widget.peer.name,
+      );
+
+      if (!mounted || _isDisposed) return;
+
+      if (result == PairingResult.success) {
+        setState(() {
+          _state = _DeviceScreenState.done;
+        });
+        await Future.delayed(const Duration(milliseconds: 800));
+        if (!mounted || _isDisposed) return;
+        _navigateToTransfer();
+      } else {
+        setState(() {
+          _errorMessage = "Pairing failed. Try again.";
+          _state = _DeviceScreenState.scanning;
+        });
+      }
+    } catch (e) {
+      if (!mounted || _isDisposed) return;
+      setState(() {
+        _errorMessage = "Error occurred. Try again.";
+        _state = _DeviceScreenState.scanning;
+      });
+    }
+  }
+
   String _getQrPayload() {
     return jsonEncode({
       "deviceId": SettingsStore.instance.deviceId,
@@ -143,9 +185,13 @@ class _DeviceScreenStateWidget extends State<DeviceScreen> with SingleTickerProv
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Text(
-          "Scan this code on ${widget.peer.name}",
-          style: BeamTextStyles.headline,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24.0),
+          child: Text(
+            "Scan this code on ${widget.peer.name}",
+            style: BeamTextStyles.headline.copyWith(fontSize: 22),
+            textAlign: TextAlign.center,
+          ),
         ),
         const SizedBox(height: 24),
         RepaintBoundary(
@@ -179,7 +225,12 @@ class _DeviceScreenStateWidget extends State<DeviceScreen> with SingleTickerProv
           "Open beam on the other device and scan",
           style: BeamTextStyles.body.copyWith(color: BeamColors.textSecondary),
         ),
-        const SizedBox(height: 48),
+        const SizedBox(height: 16),
+        Text(
+          "Or enter PIN: ${BeamPairing.instance.sessionSecret}",
+          style: BeamTextStyles.title.copyWith(color: BeamColors.accent),
+        ),
+        const SizedBox(height: 32),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -222,21 +273,46 @@ class _DeviceScreenStateWidget extends State<DeviceScreen> with SingleTickerProv
         ),
         Expanded(
           flex: 4,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                "Point at the QR code on ${widget.peer.name}",
-                style: BeamTextStyles.headline,
+          child: Center(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                    child: Text(
+                      "Point at the QR code on ${widget.peer.name}",
+                      style: BeamTextStyles.headline.copyWith(fontSize: 22),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 48.0, vertical: 16.0),
+                    child: TextField(
+                      keyboardType: TextInputType.number,
+                      maxLength: 6,
+                      textAlign: TextAlign.center,
+                      style: BeamTextStyles.title,
+                      decoration: InputDecoration(
+                        hintText: "Or enter 6-digit PIN",
+                        counterText: "",
+                      ),
+                      onSubmitted: _handleManualPin,
+                      onChanged: (val) {
+                        if (val.length == 6) _handleManualPin(val);
+                      },
+                    ),
+                  ),
+                  if (_errorMessage != null) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      _errorMessage!,
+                      style: BeamTextStyles.body.copyWith(color: BeamColors.error),
+                    ),
+                  ],
+                ],
               ),
-              if (_errorMessage != null) ...[
-                const SizedBox(height: 16),
-                Text(
-                  _errorMessage!,
-                  style: BeamTextStyles.body.copyWith(color: BeamColors.error),
-                ),
-              ],
-            ],
+            ),
           ),
         ),
       ],
@@ -279,22 +355,22 @@ class _DeviceScreenStateWidget extends State<DeviceScreen> with SingleTickerProv
         ),
       ),
       body: content,
-      floatingActionButton: Platform.isAndroid
-          ? FloatingActionButton(
-              onPressed: () {
-                setState(() {
-                  _state = _state == _DeviceScreenState.scanning
-                      ? _DeviceScreenState.showingQR
-                      : _DeviceScreenState.scanning;
-                });
-              },
-              backgroundColor: BeamColors.accent,
-              child: Icon(
-                _state == _DeviceScreenState.scanning ? Icons.qr_code : Icons.camera_alt,
-                color: Colors.white,
-              ),
-            )
-          : null,
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          setState(() {
+            _state = _state == _DeviceScreenState.scanning
+                ? _DeviceScreenState.showingQR
+                : _DeviceScreenState.scanning;
+          });
+        },
+        backgroundColor: BeamColors.accent,
+        child: Icon(
+          _state == _DeviceScreenState.scanning
+              ? Icons.qr_code
+              : (Platform.isAndroid ? Icons.camera_alt : Icons.keyboard),
+          color: Colors.white,
+        ),
+      ),
     );
   }
 }
